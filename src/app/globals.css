@@ -1,0 +1,24 @@
+@import "tailwindcss";
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  background: #020617;
+  color: #fff;
+  overscroll-behavior: none;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: manipulation;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Applied by useIdleCursor after 5 s without input. */
+.cursor-hidden,
+.cursor-hidden * {
+  cursor: none !important;
+}
+
+canvas {
+  touch-action: none;
+}

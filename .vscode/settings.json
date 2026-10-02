@@ -1,0 +1,8 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "/^Test-Path node_modules/typescript/lib/typescript\\.js; Get-ChildItem node_modules/typescript -Name \\| Select-Object -First 20; Get-Content node_modules/next/package\\.json \\| Select-String '\"typescript\"\\|\"node\":' $/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}
