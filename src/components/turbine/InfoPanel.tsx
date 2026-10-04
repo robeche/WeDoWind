@@ -14,10 +14,12 @@ import {
 } from "./parts";
 
 const TOWER_ORDER: TowerPartId[] = [
-  "transformer",
   "converter",
+  "transformer",
+  "switchgear",
   "controlCabinet",
   "cables",
+  "dataCables",
   "lift",
   "ladder",
   "platforms",

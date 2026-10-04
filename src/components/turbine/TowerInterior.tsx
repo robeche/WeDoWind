@@ -29,12 +29,18 @@ const LIFT_PAUSE_S = 4;
 
 const CONTROL_A = -45 * DEG;
 const TRANSFORMER_A = 180 * DEG;
+/** Ground floor: power converters. Deck above: transformer (in its cage) + grid switchgear. */
 const CONVERTER_AS = [195 * DEG, 235 * DEG];
+const SWITCHGEAR_A = 260 * DEG;
+/** LV cables converter → transformer rise through the deck at these bearings (beside the cage). */
+const LV_RISER_AS = [206 * DEG, 225 * DEG];
+/** MV cables switchgear → grid drop down the wall here. */
+const MV_DROP_A = 262 * DEG;
 const LIGHT_COLUMNS = [150 * DEG, 330 * DEG];
 /** Power cables run down a cable tray on the wall at this bearing (between the converters). */
 const TRAY_A = 215 * DEG;
 const TRAY_TOP_Y = 74.8;
-const TRAY_BOTTOM_Y = 6.4;
+const TRAY_BOTTOM_Y = 3.0; // just under the transformer deck, above the converter roofs
 const CABLE_LOOP_BOTTOM_Y = 78;
 const CABLE_R = 0.024;
 
@@ -393,7 +399,10 @@ function ServiceLift({ visibleRef }: { visibleRef: React.RefObject<boolean> }) {
 }
 
 /** Where the converter → transformer cables drop through the converter deck. */
-const DECK_CABLE_HOLES = CONVERTER_AS.map((a) => ({ a, r: 1.95 }));
+const DECK_CABLE_HOLES = [
+  ...LV_RISER_AS.map((a) => ({ a, r: towerInnerR(3.4) - 0.25, w: 0.13 })),
+  { a: SWITCHGEAR_A, r: 2.48, w: 0.16 },
+];
 
 function Platforms() {
   const grating = useGratingTexture();
@@ -414,7 +423,7 @@ function Platforms() {
         }
         // Converter deck: cable holes down to the transformer.
         if (y === DECK_Y) {
-          for (const { a, r } of DECK_CABLE_HOLES) shape.holes.push(new THREE.Path(hatchCorners(a, r - 0.12, r + 0.12, 0.14)));
+          for (const { a, r, w } of DECK_CABLE_HOLES) shape.holes.push(new THREE.Path(hatchCorners(a, r - 0.12, r + 0.12, w)));
         }
         // Top platform: central opening for the hanging cable loop.
         if (y === TOP_PLATFORM_Y) {
@@ -547,10 +556,10 @@ function ConverterCabinets() {
   const w = 1.1;
   const h = 2.1;
   const d = 0.6;
-  const mounts = CONVERTER_AS.map((a) => wallMount(a, DECK_Y, w, d));
+  const mounts = CONVERTER_AS.map((a) => wallMount(a, GROUND_FLOOR_Y, w, d));
   const mid = mounts[0].position.map((v, i) => (v + mounts[1].position[i]) / 2) as [number, number, number];
   return (
-    <Part id="converter" labelAt={[mid[0], DECK_Y + h + 0.4, mid[2]]}>
+    <Part id="converter" labelAt={[mid[0], GROUND_FLOOR_Y + h + 0.3, mid[2] + 0.6]}>
       {mounts.map((mount, k) => (
         <group key={k} {...mount}>
           <mesh position={[0, h / 2, 0]}>
@@ -577,12 +586,13 @@ function ConverterCabinets() {
 
 const TRANSFORMER_W = 1.7;
 const TRANSFORMER_D = 0.95;
-const TRANSFORMER_MOUNT = wallMount(TRANSFORMER_A, GROUND_FLOOR_Y, TRANSFORMER_W, TRANSFORMER_D, 0.25);
+const TRANSFORMER_Y = DECK_Y;
+const TRANSFORMER_MOUNT = wallMount(TRANSFORMER_A, TRANSFORMER_Y, TRANSFORMER_W, TRANSFORMER_D, 0.25);
 const COIL_X = [-0.55, 0, 0.55];
 const CAGE_W = 2.1;
 const CAGE_D = 1.3;
 const CAGE_H = 2.3;
-const CAGE_MOUNT = wallMount(TRANSFORMER_A, GROUND_FLOOR_Y, CAGE_W, CAGE_D);
+const CAGE_MOUNT = wallMount(TRANSFORMER_A, TRANSFORMER_Y, CAGE_W, CAGE_D);
 const CAGE_DOOR_W = 0.9;
 
 /** World position of a point given in the transformer's local frame. */
@@ -682,7 +692,7 @@ function Transformer() {
   const w = TRANSFORMER_W;
   const d = TRANSFORMER_D;
   return (
-    <Part id="transformer" labelAt={[CAGE_MOUNT.position[0], GROUND_FLOOR_Y + CAGE_H + 0.35, CAGE_MOUNT.position[2]]}>
+    <Part id="transformer" labelAt={[CAGE_MOUNT.position[0], TRANSFORMER_Y + CAGE_H + 0.35, CAGE_MOUNT.position[2]]}>
       <group {...TRANSFORMER_MOUNT}>
         {/* Base frame */}
         <mesh position={[0, 0.06, 0]}>
@@ -722,19 +732,85 @@ function Transformer() {
   );
 }
 
-/* Power cables: nacelle → converter → transformer → grid -------------- */
+/* Grid switchgear --------------------------------------------------- */
 
-/** Converter mounts (same maths as ConverterCabinets). */
+const SWITCHGEAR_W = 0.8;
+const SWITCHGEAR_D = 0.9;
+const SWITCHGEAR_H = 2.0;
+const SWITCHGEAR_MOUNT = wallMount(SWITCHGEAR_A, DECK_Y, SWITCHGEAR_W, SWITCHGEAR_D);
+const switchgearCentreR = flatFaceR(DECK_Y, SWITCHGEAR_W / 2, 0.06) - SWITCHGEAR_D / 2;
+
+/** Medium-voltage switchgear: connects the turbine to (and isolates it from) the grid. */
+function Switchgear() {
+  const w = SWITCHGEAR_W;
+  const h = SWITCHGEAR_H;
+  const d = SWITCHGEAR_D;
+  const z = d / 2 + 0.006;
+  return (
+    <Part id="switchgear" labelAt={[SWITCHGEAR_MOUNT.position[0], DECK_Y + h + 0.35, SWITCHGEAR_MOUNT.position[2]]}>
+      <group {...SWITCHGEAR_MOUNT}>
+        <mesh position={[0, h / 2, 0]}>
+          <boxGeometry args={[w, h, d]} />
+          <meshStandardMaterial color="#b8bec3" roughness={0.5} metalness={0.2} />
+        </mesh>
+        {/* Mimic diagram: busbar + three feeders */}
+        <mesh position={[0, 1.55, z]} userData={{ noHighlight: true }}>
+          <planeGeometry args={[0.6, 0.02]} />
+          <meshStandardMaterial color="#1f2937" />
+        </mesh>
+        {[-0.2, 0, 0.2].map((x) => (
+          <group key={x}>
+            <mesh position={[x, 1.38, z]} userData={{ noHighlight: true }}>
+              <planeGeometry args={[0.02, 0.34]} />
+              <meshStandardMaterial color="#1f2937" />
+            </mesh>
+            {/* Switch position indicator (green = open/safe) and operating handle socket */}
+            <mesh position={[x, 1.33, z + 0.003]} userData={{ noHighlight: true }}>
+              <circleGeometry args={[0.035, 16]} />
+              <meshStandardMaterial color="#16a34a" emissive="#16a34a" emissiveIntensity={0.6} />
+            </mesh>
+            <mesh position={[x, 1.0, z + 0.01]} rotation={[Math.PI / 2, 0, 0]}>
+              <cylinderGeometry args={[0.03, 0.03, 0.03, 12]} />
+              <meshStandardMaterial color="#111827" metalness={0.5} />
+            </mesh>
+            {/* Voltage presence lamp */}
+            <mesh position={[x, 1.72, z + 0.004]} userData={{ noHighlight: true }}>
+              <circleGeometry args={[0.015, 12]} />
+              <meshStandardMaterial color="#ef4444" emissive="#ef4444" emissiveIntensity={1.5} toneMapped={false} />
+            </mesh>
+          </group>
+        ))}
+        {/* Cable compartment door + danger sign */}
+        <mesh position={[0, 0.42, z]} userData={{ noHighlight: true }}>
+          <planeGeometry args={[w - 0.1, 0.62]} />
+          <meshStandardMaterial color="#9aa1a6" roughness={0.6} />
+        </mesh>
+        <mesh position={[0, 0.5, z + 0.004]} rotation={[0, 0, Math.PI]} userData={{ noHighlight: true }}>
+          <circleGeometry args={[0.09, 3]} />
+          <meshStandardMaterial color="#facc15" />
+        </mesh>
+      </group>
+    </Part>
+  );
+}
+
+/* Cables ------------------------------------------------------------ */
+
 const CONVERTER_W = 1.1;
 const CONVERTER_DEPTH = 0.6;
 const CONVERTER_H = 2.1;
-const converterCentreR = flatFaceR(DECK_Y, CONVERTER_W / 2, 0.06) - CONVERTER_DEPTH / 2;
+const CONVERTER_TOP_Y = GROUND_FLOOR_Y + CONVERTER_H;
+const converterCentreR = flatFaceR(GROUND_FLOOR_Y, CONVERTER_W / 2, 0.06) - CONVERTER_DEPTH / 2;
+/** Point on a converter roof: `back` metres behind its centre line, `side` along its width. */
+const converterRoof = (a: number, back: number, side: number, lift = 0.02) =>
+  polar(a, converterCentreR + back, CONVERTER_TOP_Y + lift).addScaledVector(tangent(a), side);
 
-function cableTube(points: THREE.Vector3[], segments: number) {
+function cableTube(points: THREE.Vector3[], segments: number, radius = CABLE_R) {
   const curve = new THREE.CatmullRomCurve3(points, false, "centripetal");
-  return new THREE.TubeGeometry(curve, segments, CABLE_R, 6, false);
+  return new THREE.TubeGeometry(curve, segments, radius, 6, false);
 }
 
+/** Power path: nacelle → wall tray → converters (roof) → transformer → switchgear → grid. */
 function PowerCables() {
   const geometries = useMemo(() => {
     const t = tangent(TRAY_A);
@@ -750,53 +826,96 @@ function PowerCables() {
       polar(TRAY_A, trayR(TRAY_TOP_Y + 1.5) - 0.25, TRAY_TOP_Y + 1.2),
       trayTop,
       polar(TRAY_A, trayR(40), 40),
+      polar(TRAY_A, trayR(TRAY_BOTTOM_Y + 1), TRAY_BOTTOM_Y + 1),
       trayBottom,
     ];
     const out: THREE.BufferGeometry[] = [];
 
     CONVERTER_AS.forEach((a, k) => {
-      // Top-down feed into the converter cabinet roof (near its back).
-      const entry = polar(a, converterCentreR + 0.23, DECK_Y + CONVERTER_H + 0.02);
       const midA = (TRAY_A + a) / 2;
+      // 1) Generator cables into the converter roof, behind the fan (never the front).
       for (let j = 0; j < 3; j++) {
         const off = t.clone().multiplyScalar((k * 3 + j - 2.5) * 0.055);
-        const pts = [
-          ...drop.map((p) => p.clone().add(off)),
-          polar(midA, trayR(6) - 0.15, DECK_Y + CONVERTER_H + 0.55).addScaledVector(t, (j - 1) * 0.05),
-          entry.clone().add(new THREE.Vector3(0, 0.25, 0)).addScaledVector(tangent(a), (j - 1) * 0.07),
-          entry.clone().addScaledVector(tangent(a), (j - 1) * 0.07),
-        ];
-        out.push(cableTube(pts, 420));
+        const side = (j - 1) * 0.08;
+        out.push(
+          cableTube(
+            [
+              ...drop.map((p) => p.clone().add(off)),
+              polar(midA, trayR(2.9) - 0.12, CONVERTER_TOP_Y + 0.22).addScaledVector(t, (j - 1) * 0.05),
+              converterRoof(a, 0.23, side, 0.12),
+              converterRoof(a, 0.23, side),
+            ],
+            420,
+          ),
+        );
       }
 
-      // Converter output → down through the deck → over the cage → transformer LV busbars.
+      // 2) Converter output: out of the roof (back corner), up the wall through the deck beside
+      //    the cage, in through the cage side and along under the transformer to its LV busbars.
+      const riserA = LV_RISER_AS[k];
+      const towardsRiser = Math.sign(riserA - a);
+      const rRiser = towerInnerR(DECK_Y) - 0.25;
       for (let j = 0; j < 3; j++) {
-        const s = (j - 1) * 0.06;
-        const busbar = transformerPoint(COIL_X[j], 1.5, 0.3 + k * 0.05);
-        const pts = [
-          polar(a, converterCentreR - CONVERTER_DEPTH / 2 + 0.05, DECK_Y + 0.35).addScaledVector(tangent(a), s),
-          polar(a, 1.98, DECK_Y + 0.05).addScaledVector(tangent(a), s),
-          polar(a, 1.92, DECK_Y - 0.3).addScaledVector(tangent(a), s),
-          new THREE.Vector3(busbar.x, GROUND_FLOOR_Y + CAGE_H + 0.15, busbar.z),
-          new THREE.Vector3(busbar.x, busbar.y + 0.35, busbar.z),
-          busbar,
-        ];
-        out.push(cableTube(pts, 60));
+        const side = towardsRiser * (0.3 + j * 0.08);
+        const tr = tangent(riserA).multiplyScalar((j - 1) * 0.05);
+        const busbar = transformerPoint(COIL_X[j], 1.0, 0.32 + k * 0.05);
+        out.push(
+          cableTube(
+            [
+              converterRoof(a, 0.2, side),
+              converterRoof(a, 0.2, side, 0.2),
+              polar(riserA, rRiser, CONVERTER_TOP_Y + 0.35).add(tr),
+              polar(riserA, rRiser, DECK_Y + 0.25).add(tr),
+              new THREE.Vector3(-CAGE_W / 2 - 0.12, DECK_Y + 0.4 + j * 0.05, busbar.z + 0.06 + k * 0.04),
+              new THREE.Vector3(-CAGE_W / 2 + 0.2, DECK_Y + 0.42 + j * 0.05, busbar.z + 0.06 + k * 0.04),
+              new THREE.Vector3(busbar.x, busbar.y - 0.3, busbar.z + 0.05),
+              busbar,
+            ],
+            90,
+          ),
+        );
       }
     });
 
-    // Medium-voltage cables from the HV bushings down into the foundation (to the grid).
-    COIL_X.forEach((x) => {
-      const bushing = transformerPoint(x, 2.0, -0.08);
-      const pts = [
-        bushing,
-        transformerPoint(x, 2.18, -0.1),
-        transformerPoint(x * 0.6, 2.15, -0.42),
-        transformerPoint(x * 0.6, 1.0, -0.5),
-        transformerPoint(x * 0.6, -0.3, -0.5),
-      ];
-      out.push(cableTube(pts, 40));
+    // 3) Transformer HV bushings → over the cage → switchgear roof.
+    const sgRoof = (side: number, lift = 0.02) =>
+      polar(SWITCHGEAR_A, switchgearCentreR + 0.25, DECK_Y + SWITCHGEAR_H + lift).addScaledVector(
+        tangent(SWITCHGEAR_A),
+        side,
+      );
+    COIL_X.forEach((x, j) => {
+      const side = (j - 1) * 0.12;
+      out.push(
+        cableTube(
+          [
+            transformerPoint(x, 2.0, -0.08),
+            transformerPoint(x, 2.25, -0.1),
+            transformerPoint(x * 0.4 - 0.2, CAGE_H + 0.35, -0.2),
+            sgRoof(side, 0.55),
+            sgRoof(side),
+          ],
+          60,
+        ),
+      );
     });
+
+    // 4) Switchgear → down through the deck → down the wall → into the foundation (grid).
+    for (let j = 0; j < 3; j++) {
+      const s = (j - 1) * 0.06;
+      const tm = tangent(MV_DROP_A).multiplyScalar(s);
+      out.push(
+        cableTube(
+          [
+            polar(SWITCHGEAR_A, switchgearCentreR + 0.22, DECK_Y + 0.3).addScaledVector(tangent(SWITCHGEAR_A), s),
+            polar(SWITCHGEAR_A, 2.48, DECK_Y - 0.1).addScaledVector(tangent(SWITCHGEAR_A), s),
+            polar(MV_DROP_A, towerInnerR(2.6) - 0.1, 2.6).add(tm),
+            polar(MV_DROP_A, towerInnerR(1.2) - 0.1, 1.2).add(tm),
+            polar(MV_DROP_A, towerInnerR(0.6) - 0.1, GROUND_FLOOR_Y - 0.4).add(tm),
+          ],
+          50,
+        ),
+      );
+    }
     return out;
   }, []);
   useEffect(() => () => geometries.forEach((g) => g.dispose()), [geometries]);
@@ -805,7 +924,7 @@ function PowerCables() {
   const tray = useMemo(() => {
     const n = radial(TRAY_A).negate();
     const t = tangent(TRAY_A);
-    const from = polar(TRAY_A, trayR(TRAY_BOTTOM_Y - 0.4) + 0.03, TRAY_BOTTOM_Y - 0.4);
+    const from = polar(TRAY_A, trayR(TRAY_BOTTOM_Y + 0.2) + 0.03, TRAY_BOTTOM_Y + 0.2);
     const to = polar(TRAY_A, trayR(TRAY_TOP_Y + 0.4) + 0.03, TRAY_TOP_Y + 0.4);
     return {
       n,
@@ -832,6 +951,54 @@ function PowerCables() {
         <BoxBeam key={i} from={side.from} to={side.to} width={0.015} thickness={0.08} normal={tray.n}>
           <meshStandardMaterial color="#9aa1a6" metalness={0.6} roughness={0.4} />
         </BoxBeam>
+      ))}
+    </Part>
+  );
+}
+
+/** Control & data cables: control cabinet → (wall-mounted run under the deck) → converters. */
+const DATA_COLOURS = ["#475569", "#1d4ed8", "#15803d"];
+const DATA_RUN_Y = 3.0;
+const DATA_RUN_R = towerInnerR(DATA_RUN_Y) - 0.4;
+
+function DataCables() {
+  const controlMount = wallMount(CONTROL_A, GROUND_FLOOR_Y, 0.8, 0.4);
+  const geometries = useMemo(() => {
+    const start = new THREE.Vector3(controlMount.position[0], GROUND_FLOOR_Y + 1.9, controlMount.position[2]);
+    const startA = CONTROL_A + 2 * Math.PI; // 315°, so the run sweeps down through 270° to the converters
+    const arc = (toA: number) => {
+      const pts: THREE.Vector3[] = [];
+      for (let a = startA - 5 * DEG; a > toA; a -= 6 * DEG) pts.push(polar(a, DATA_RUN_R, DATA_RUN_Y));
+      return pts;
+    };
+    const out: Array<{ geometry: THREE.BufferGeometry; colour: string }> = [];
+    CONVERTER_AS.forEach((a, k) => {
+      const endA = a + (k === 0 ? 8 : 6) * DEG;
+      // Enter the roof on the side away from the power cables' exit.
+      const dataSide = -Math.sign(LV_RISER_AS[k] - a) * 0.24;
+      for (let j = 0; j < 3; j++) {
+        const dy = new THREE.Vector3(0, (j - 1) * 0.03, 0);
+        const pts = [
+          start.clone().add(new THREE.Vector3(0, 0.01, 0)).addScaledVector(tangent(CONTROL_A), (j - 1) * 0.06),
+          polar(CONTROL_A, DATA_RUN_R + 0.1, DATA_RUN_Y - 0.25).add(dy),
+          ...arc(endA).map((p) => p.add(dy)),
+          converterRoof(a, 0.12, dataSide + (j - 1) * 0.04, 0.2),
+          converterRoof(a, 0.12, dataSide + (j - 1) * 0.04),
+        ];
+        out.push({ geometry: cableTube(pts, 160, 0.011), colour: DATA_COLOURS[j] });
+      }
+    });
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => () => geometries.forEach((g) => g.geometry.dispose()), [geometries]);
+
+  return (
+    <Part id="dataCables" labelAt={polar(270 * DEG, DATA_RUN_R - 0.2, DATA_RUN_Y + 0.25).toArray()}>
+      {geometries.map(({ geometry, colour }, i) => (
+        <mesh key={i} geometry={geometry}>
+          <meshStandardMaterial color={colour} roughness={0.5} />
+        </mesh>
       ))}
     </Part>
   );
@@ -882,7 +1049,9 @@ function TowerInterior({
         <ControlCabinet />
         <ConverterCabinets />
         <Transformer />
+        <Switchgear />
         <PowerCables />
+        <DataCables />
       </group>
     </>
   );

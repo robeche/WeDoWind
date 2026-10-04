@@ -12,7 +12,9 @@ export type TowerPartId =
   | "controlCabinet"
   | "converter"
   | "transformer"
-  | "cables";
+  | "switchgear"
+  | "cables"
+  | "dataCables";
 export type PartId = ExteriorPartId | TowerPartId;
 
 /** Camera framing: orbit target, distance from it and elevation angle. */
@@ -69,14 +71,14 @@ export const TOWER_PARTS: Record<TowerPartId, PartInfo> = {
     name: "Transformer",
     description:
       "Steps the electricity up to medium voltage for the local grid. It sits inside a locked mesh cage: only authorised electricians may open it.",
-    focus: { target: [0, 1.6, -1.7], distance: 9, elevationDeg: 14 },
+    focus: { target: [0, 4.6, -1.7], distance: 10, elevationDeg: 16 },
   },
   converter: {
     id: "converter",
     name: "Power converter",
     description:
       "Turns the generator's variable-speed output into steady 50 Hz electricity that matches the grid.",
-    focus: { target: [-1.2, 4.6, -1.7], distance: 9, elevationDeg: 16 },
+    focus: { target: [-1.2, 1.7, -1.7], distance: 9, elevationDeg: 14 },
   },
   controlCabinet: {
     id: "controlCabinet",
@@ -106,12 +108,26 @@ export const TOWER_PARTS: Record<TowerPartId, PartInfo> = {
       "Steel-grating (Tramex) platforms at regular heights, with hatches for the ladder and lift, so climbers can rest and work safely.",
     focus: { target: [0, 13, 0], distance: 11, elevationDeg: 28 },
   },
+  switchgear: {
+    id: "switchgear",
+    name: "Grid switchgear",
+    description:
+      "The turbine's connection to the grid: a medium-voltage switch that links it to the local network and can disconnect it safely for maintenance or if there is a fault.",
+    focus: { target: [-2.0, 4.5, -0.4], distance: 9, elevationDeg: 14 },
+  },
+  dataCables: {
+    id: "dataCables",
+    name: "Control cables",
+    description:
+      "Thin signal and data cables link the control cabinet to the power converters, so the turbine's computer can tell them exactly how much power to deliver.",
+    focus: { target: [-1.6, 2.6, -0.6], distance: 10, elevationDeg: 18 },
+  },
   cables: {
     id: "cables",
     name: "Power cables",
     description:
       "Heavy cables hang from the nacelle in a free loop (so it can turn with the wind), run down a tray on the tower wall to the power converter, then on to the transformer and out to the grid.",
-    focus: { target: [-1.1, 5.2, -1.5], distance: 12, elevationDeg: 16 },
+    focus: { target: [-1.1, 3.6, -1.6], distance: 12, elevationDeg: 14 },
   },
   lights: {
     id: "lights",
@@ -128,7 +144,7 @@ export const isTowerPart = (id: PartId | null): id is TowerPartId => id !== null
 /** Quick-jump levels inside the open tower. */
 export const TOWER_LEVELS: Array<{ label: string; focus: Focus }> = [
   { label: "Base", focus: { target: [0, 2.8, 0], distance: 15, elevationDeg: 14 } },
-  { label: "Converter deck", focus: { target: [0, 4.8, 0], distance: 13, elevationDeg: 20 } },
+  { label: "Transformer deck", focus: { target: [0, 4.8, 0], distance: 13, elevationDeg: 20 } },
   { label: "Mid tower", focus: { target: [0, 45, 0], distance: 14, elevationDeg: 12 } },
   { label: "Top", focus: { target: [0, 86, 0], distance: 14, elevationDeg: 8 } },
 ];
