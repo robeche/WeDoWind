@@ -20,9 +20,11 @@ import { useMemo, useState, type ReactNode } from "react";
 import AnimatedNumber from "@/components/AnimatedNumber";
 import EquivalentsCycler from "@/components/EquivalentsCycler";
 import MessageTicker from "@/components/MessageTicker";
+import MobileKiosk from "@/components/MobileKiosk";
 import MetricCard from "@/components/MetricCard";
 import PowerTrend from "@/components/PowerTrend";
 import SafeBoundary from "@/components/SafeBoundary";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { useFullscreen, useIdleCursor, useKioskMaintenance, useNow } from "@/hooks/useKiosk";
 import { useLiveTurbine, useTurbineHistory } from "@/hooks/useTurbineData";
 import type { TurbineStatus } from "@/services/aceApi";
@@ -80,6 +82,8 @@ export default function KioskPage() {
   useKioskMaintenance();
   // While a visitor explores the 3D model, the telemetry chips step aside.
   const [exploring, setExploring] = useState(false);
+  // Phones get a full-screen turbine with the figures floating around it.
+  const isMobile = useIsMobile();
 
   const metrics = useMemo(() => computeCommunityMetrics(live, history), [live, history]);
   const ready = live !== null;
@@ -90,6 +94,21 @@ export default function KioskPage() {
   const windDirection = live?.windDirectionDeg ?? 225;
   const wind = compassPoint(windDirection);
   const dash = "—";
+
+  if (isMobile) {
+    return (
+      <MobileKiosk
+        now={now}
+        live={live}
+        metrics={metrics}
+        status={status}
+        statusStyle={statusStyle}
+        connecting={connecting}
+        reconnecting={reconnecting}
+        lastUpdated={lastUpdated}
+      />
+    );
+  }
 
   return (
     <main className="flex h-dvh w-screen flex-col gap-[1.6vh] overflow-hidden bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 p-[2vh] text-white">

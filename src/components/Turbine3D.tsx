@@ -8,10 +8,8 @@ import type { TurbineStatus } from "@/services/aceApi";
 import { sunPosition } from "@/utils/sun";
 
 import {
-  BLADE_ROOT_R,
   DEG,
   NACELLE_AXIS_Y,
-  ROTOR_RADIUS,
   ROTOR_Z,
   SHAFT_TILT,
   TOWER_BASE_R,
@@ -19,9 +17,15 @@ import {
   TOWER_TOP_R,
   TWO_PI,
 } from "./turbine/dimensions";
+import { createBladeGeometry } from "./turbine/blade";
+import { BladeInternalsMemo, PitchDriveMemo } from "./turbine/BladeStructure";
+import { GeneratorRotor, GeneratorStatic } from "./turbine/GeneratorInternals";
+import { latheAlongZ } from "./turbine/geometry";
 import InfoPanel from "./turbine/InfoPanel";
-import { InteractionProvider, Part, useInteraction, type InteractionState } from "./turbine/interaction";
-import { TOWER_OPEN_FOCUS, isTowerPart, PART_INFO, type Focus, type PartId } from "./turbine/parts";
+import { CalloutLayer, type AnchorId, type CalloutRegistry, type CalloutSpec } from "./turbine/Callouts";
+import { HoverLabel, InteractionProvider, Part, useInteraction, type InteractionState } from "./turbine/interaction";
+import { NacelleInterior, YawSystem } from "./turbine/NacelleInterior";
+import { PART_INFO, TOWER_OPEN_FOCUS, type Focus, type OpenableId, type PartId } from "./turbine/parts";
 import TowerInterior from "./turbine/TowerInterior";
 
 const CAMERA_TARGET: [number, number, number] = [0, 78, 0];
@@ -29,6 +33,10 @@ const HOME_FOCUS: Focus = { target: CAMERA_TARGET, distance: 270, elevationDeg: 
 const AUTO_ORBIT_RESUME_MS = 15_000;
 /** Fraction of the canvas width the picture shifts left while the info panel is open. */
 const PANEL_SHIFT = 0.2;
+/** Phone: fraction of the canvas height the picture moves up while the bottom sheet is open. */
+const PANEL_SHIFT_COMPACT = 0.22;
+/** Phone (narrow portrait screen): stand further back so the rotor fits. */
+const HOME_FOCUS_COMPACT: Focus = { target: [0, 74, 0], distance: 400, elevationDeg: 5 };
 /** A public kiosk should not stay "opened" forever: close after this long without input. */
 const IDLE_CLOSE_MS = 90_000;
 /** Wind particles move at live wind speed × this factor (m/s → scene m/s). */
@@ -52,109 +60,19 @@ export interface Turbine3DProps {
   className?: string;
   /** Called when a visitor starts / stops exploring (a part selected or the tower open). */
   onExploringChange?: (exploring: boolean) => void;
+  /** Phone layout: full-screen scene, bottom-sheet panel, floating data signs. */
+  compact?: boolean;
+  /** Floating signs around the turbine (phone layout). */
+  callouts?: CalloutSpec[];
 }
 
-interface LiveInputs extends Omit<Turbine3DProps, "className" | "onExploringChange"> {
+interface LiveInputs extends Omit<Turbine3DProps, "className" | "onExploringChange" | "compact" | "callouts"> {
   nightFactor: number;
 }
 
 /* ------------------------------------------------------------------ */
 /* Procedural geometry                                                 */
 /* ------------------------------------------------------------------ */
-
-/**
- * Lofted aerodynamic blade along +Y: circular root → cambered NACA-style aerofoil,
- * with chord taper, twist and pre-bend. Leading edge faces +X (direction of travel
- * for a clockwise rotor viewed from upwind), pressure side faces upwind (+Z).
- */
-function createBladeGeometry(rootR: number, tipR: number): THREE.BufferGeometry {
-  const SECTIONS = 48;
-  const RING = 32;
-  const ROOT_DIAMETER = 2.7;
-  const MAX_CHORD = 4.1;
-  const MAX_CHORD_T = 0.2;
-  const TIP_CHORD = 0.3;
-  const span = tipR - rootR;
-
-  const positions: number[] = [];
-  const indices: number[] = [];
-
-  for (let i = 0; i < SECTIONS; i++) {
-    const t = i / (SECTIONS - 1);
-    const r = rootR + t * span;
-
-    const chord =
-      t < MAX_CHORD_T
-        ? lerp(ROOT_DIAMETER, MAX_CHORD, smoothstep(t, 0.02, MAX_CHORD_T))
-        : TIP_CHORD + (MAX_CHORD - TIP_CHORD) * Math.pow((1 - t) / (1 - MAX_CHORD_T), 1.1);
-    const aerofoilBlend = smoothstep(t, 0.02, 0.22);
-    const thickness =
-      t < MAX_CHORD_T ? lerp(1, 0.4, smoothstep(t, 0.02, MAX_CHORD_T)) : lerp(0.4, 0.16, smoothstep(t, MAX_CHORD_T, 0.65));
-    const twistDeg = t < MAX_CHORD_T ? 14 : 14 - 15 * Math.pow((t - MAX_CHORD_T) / (1 - MAX_CHORD_T), 0.7);
-    const phi = twistDeg * DEG;
-    const prebend = 1.8 * t * t;
-    const pivot = lerp(0.5, 0.35, aerofoilBlend);
-
-    // u: leading-edge direction, v: suction-side direction (both in the XZ plane).
-    const ux = Math.cos(phi);
-    const uz = Math.sin(phi);
-    const vx = Math.sin(phi);
-    const vz = -Math.cos(phi);
-
-    for (let k = 0; k < RING; k++) {
-      const theta = (k / RING) * TWO_PI;
-      const x = 0.5 * (1 + Math.cos(theta));
-      const side = Math.sin(theta) >= 0 ? 1 : -1;
-      const yt =
-        5 * thickness * (0.2969 * Math.sqrt(x) - 0.126 * x - 0.3516 * x ** 2 + 0.2843 * x ** 3 - 0.1036 * x ** 4);
-      const camber = x < 0.4 ? 0.25 * (0.8 * x - x * x) : (0.04 / 0.36) * (0.2 + 0.8 * x - x * x);
-      const y = lerp(0.5 * Math.sin(theta), camber + side * yt, aerofoilBlend);
-
-      const sc = (pivot - x) * chord;
-      const w = y * chord;
-      positions.push(sc * ux + w * vx, r, sc * uz + w * vz + prebend);
-    }
-  }
-
-  for (let i = 0; i < SECTIONS - 1; i++) {
-    for (let k = 0; k < RING; k++) {
-      const a = i * RING + k;
-      const b = i * RING + ((k + 1) % RING);
-      const c = (i + 1) * RING + k;
-      const d = (i + 1) * RING + ((k + 1) % RING);
-      indices.push(a, b, c, b, d, c);
-    }
-  }
-
-  // Rounded tip cap.
-  const last = (SECTIONS - 1) * RING;
-  let cx = 0;
-  let cz = 0;
-  for (let k = 0; k < RING; k++) {
-    cx += positions[(last + k) * 3];
-    cz += positions[(last + k) * 3 + 2];
-  }
-  const tipIndex = positions.length / 3;
-  positions.push(cx / RING, tipR + 0.25, cz / RING);
-  for (let k = 0; k < RING; k++) indices.push(last + k, last + ((k + 1) % RING), tipIndex);
-
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
-  geometry.setIndex(indices);
-  geometry.computeVertexNormals();
-  return geometry;
-}
-
-/** Lathe a (radius, z) profile around the +Z axis. */
-function latheAlongZ(profile: Array<[number, number]>, segments = 48): THREE.BufferGeometry {
-  const geometry = new THREE.LatheGeometry(
-    profile.map(([r, z]) => new THREE.Vector2(r, z)),
-    segments,
-  );
-  geometry.rotateX(Math.PI / 2);
-  geometry.computeVertexNormals();
-  return geometry;
-}
 
 /**
  * EP3-style rear nacelle: a short faceted box (flat roof, vertical sides, large lower
@@ -216,7 +134,7 @@ function useTurbineGeometries() {
       [0, g0], [2.95, g0], [3.2, g0 + 0.2], [3.2, g1 - 0.15], [2.95, g1], [0, g1],
     ];
     return {
-      blade: createBladeGeometry(BLADE_ROOT_R, ROTOR_RADIUS),
+      blade: createBladeGeometry(),
       spinner: latheAlongZ(spinnerProfile, 64),
       nacelle: createNacelleGeometry(),
       generator: latheAlongZ(generatorProfile, 96),
@@ -248,29 +166,49 @@ function targetPitchRad(live: LiveInputs): number {
   }
 }
 
+/** Rotor angle at which blade 0 lies horizontal (pointing to nacelle +X) for inspection. */
+export const BLADE_PARK = Math.PI / 2;
+
+type ProgressRefs = Record<OpenableId, React.RefObject<number>>;
+
 function TurbineModel({
   liveRef,
   workLightYRef,
+  yawOutRef,
 }: {
   liveRef: React.RefObject<LiveInputs>;
   workLightYRef: React.RefObject<number>;
+  yawOutRef: React.RefObject<number>;
 }) {
   const geo = useTurbineGeometries();
   const yawRef = useRef<THREE.Group>(null);
   const rotorRef = useRef<THREE.Group>(null);
-  const bladeRefs = useRef<Array<THREE.Mesh | null>>([]);
+  const bladeRefs = useRef<Array<THREE.Group | null>>([]);
+  const bladeInternalsRef = useRef<THREE.Group | null>(null);
   const beaconRef = useRef<THREE.Mesh>(null);
   const sim = useRef({ rpm: 0, theta: 0, yaw: Math.PI - 225 * DEG, yawInitialised: false, pitch: 88 * DEG });
 
-  // Tower cut-away state.
-  const { towerOpen } = useInteraction();
-  const openRef = useRef(towerOpen);
-  openRef.current = towerOpen;
-  const progressRef = useRef(0);
+  // Opening state: each openable part animates 0 → 1 while it is open.
+  const { openPart } = useInteraction();
+  const openRef = useRef(openPart);
+  openRef.current = openPart;
+  const towerP = useRef(0);
+  const nacelleP = useRef(0);
+  const generatorP = useRef(0);
+  const bladesP = useRef(0);
+  const progress = useMemo<ProgressRefs>(
+    () => ({ tower: towerP, nacelle: nacelleP, generator: generatorP, blades: bladesP }),
+    [],
+  );
+
   const shellRef = useRef<THREE.Group>(null);
   const frontRef = useRef<THREE.Mesh>(null);
   const frontMatRef = useRef<THREE.MeshStandardMaterial>(null);
   const doorRef = useRef<THREE.Mesh>(null);
+  const nacelleMatRef = useRef<THREE.MeshStandardMaterial>(null);
+  const generatorMatRef = useRef<THREE.MeshStandardMaterial>(null);
+  const spinnerMatRef = useRef<THREE.MeshStandardMaterial>(null);
+  const inspectedBladeMatRef = useRef<THREE.MeshStandardMaterial>(null);
 
   useFrame((state, delta) => {
     const live = liveRef.current;
@@ -278,13 +216,15 @@ function TurbineModel({
     // `delta` is R3F's per-frame state.clock.getDelta(); calling getDelta() again here would return ~0.
     // Capped so a backgrounded tab doesn't produce one huge jump when it resumes.
     const dt = Math.min(delta, 0.25);
+    const bladesOpen = openRef.current === "blades";
 
     // Rotor: smooth to the live RPM (rotor inertia), then Δθ = (RPM · 2π / 60) · Δt.
-    const targetRpm = live.hasData ? Math.max(0, live.rotorSpeedRpm) : 0;
-    s.rpm += (targetRpm - s.rpm) * approach(dt, targetRpm > s.rpm ? 3 : 6);
+    // While a blade is being inspected the rotor brakes to a stop and parks that blade level.
+    const targetRpm = bladesOpen ? 0 : live.hasData ? Math.max(0, live.rotorSpeedRpm) : 0;
+    s.rpm += (targetRpm - s.rpm) * approach(dt, bladesOpen ? 1.2 : targetRpm > s.rpm ? 3 : 6);
     if (targetRpm === 0 && s.rpm < 0.01) s.rpm = 0;
-    const deltaTheta = ((s.rpm * 2 * Math.PI) / 60) * dt;
-    s.theta = (s.theta + deltaTheta) % TWO_PI;
+    s.theta = (s.theta + ((s.rpm * 2 * Math.PI) / 60) * dt) % TWO_PI;
+    if (bladesOpen && s.rpm < 0.8) s.theta += wrapPi(BLADE_PARK - s.theta) * approach(dt, 0.8);
     // Clockwise when viewed from upwind (+Z), as ENERCON rotors turn.
     if (rotorRef.current) rotorRef.current.rotation.z = -s.theta;
 
@@ -296,17 +236,23 @@ function TurbineModel({
     }
     s.yaw = wrapPi(s.yaw + wrapPi(targetYaw - s.yaw) * approach(dt, 2.5));
     if (yawRef.current) yawRef.current.rotation.y = s.yaw;
+    yawOutRef.current = s.yaw;
 
-    // Blade pitch: feathered when stopped, fine pitch when generating.
-    s.pitch += (targetPitchRad(live) - s.pitch) * approach(dt, 4);
+    // Blade pitch: feathered when stopped, fine pitch when generating; 0° while inspected.
+    s.pitch += ((bladesOpen ? 0 : targetPitchRad(live)) - s.pitch) * approach(dt, bladesOpen ? 1.5 : 4);
     for (const blade of bladeRefs.current) if (blade) blade.rotation.y = -s.pitch;
+    if (bladeInternalsRef.current) bladeInternalsRef.current.rotation.y = -s.pitch;
 
-    // Tower cut-away: progress 0 → 1. The removable half is always turned towards the
-    // camera, so visitors can orbit and still see inside.
-    const openTarget = openRef.current ? 1 : 0;
-    progressRef.current += (openTarget - progressRef.current) * approach(dt, 0.35);
-    if (Math.abs(openTarget - progressRef.current) < 0.002) progressRef.current = openTarget;
-    const p = progressRef.current;
+    // Opening animations.
+    (Object.keys(progress) as OpenableId[]).forEach((id) => {
+      const ref = progress[id];
+      const target = openRef.current === id ? 1 : 0;
+      ref.current += (target - ref.current) * approach(dt, 0.35);
+      if (Math.abs(target - ref.current) < 0.002) ref.current = target;
+    });
+
+    // Tower cut-away: the removable half is always turned towards the camera.
+    const p = towerP.current;
     if (shellRef.current) {
       shellRef.current.rotation.y = Math.atan2(state.camera.position.x, state.camera.position.z);
     }
@@ -319,6 +265,17 @@ function TurbineModel({
       frontMatRef.current.depthWrite = p < 0.05;
     }
     if (doorRef.current) doorRef.current.visible = p < 0.05;
+
+    // Nacelle, generator housing, hub and the inspected blade fade to ghosts when opened.
+    const ghost = (mat: THREE.MeshStandardMaterial | null, k: number, min = 0.14) => {
+      if (!mat) return;
+      mat.opacity = 1 - (1 - min) * k;
+      mat.depthWrite = k < 0.05;
+    };
+    ghost(nacelleMatRef.current, nacelleP.current, 0.12);
+    ghost(generatorMatRef.current, generatorP.current, 0.1);
+    ghost(spinnerMatRef.current, generatorP.current, 0.2);
+    ghost(inspectedBladeMatRef.current, bladesP.current, 0.16);
 
     // Aviation warning light, lit from dusk to dawn.
     if (beaconRef.current) {
@@ -334,7 +291,7 @@ function TurbineModel({
         <meshStandardMaterial color="#9aa0a6" roughness={0.95} />
       </mesh>
       {/* Plain light-grey tower (no green base bands on the Lawrence Weston turbine) */}
-      <Part id="tower" enabled={!towerOpen} labelAt={[0, 32, 0]}>
+      <Part id="tower" labelAt={[0, 32, 0]}>
         <group ref={shellRef} position={[0, TOWER_TOP / 2, 0]}>
           <mesh geometry={geo.towerBack} castShadow receiveShadow>
             <meshStandardMaterial color="#e4e7ea" roughness={0.6} metalness={0.05} side={THREE.DoubleSide} />
@@ -361,7 +318,7 @@ function TurbineModel({
           <meshStandardMaterial color="#5f6468" roughness={0.6} />
         </mesh>
       </Part>
-      <TowerInterior progressRef={progressRef} workLightYRef={workLightYRef} />
+      <TowerInterior progressRef={towerP} workLightYRef={workLightYRef} />
 
       {/* Yaw system: everything above the tower top rotates about Y */}
       <group ref={yawRef} position={[0, TOWER_TOP, 0]}>
@@ -369,11 +326,20 @@ function TurbineModel({
           <cylinderGeometry args={[TOWER_TOP_R + 0.05, TOWER_TOP_R + 0.05, 0.7, 48]} />
           <meshStandardMaterial color="#d9dde1" roughness={0.5} />
         </mesh>
+        <YawSystem progressRef={nacelleP} />
 
         <group position={[0, NACELLE_AXIS_Y, 0]} rotation={[-SHAFT_TILT, 0, 0]}>
           <Part id="nacelle" labelAt={[0, 3.4, ROTOR_Z - 4.8]}>
             <mesh geometry={geo.nacelle} castShadow receiveShadow>
-              <meshStandardMaterial color="#e9ecee" roughness={0.45} metalness={0.08} flatShading side={THREE.DoubleSide} />
+              <meshStandardMaterial
+                ref={nacelleMatRef}
+                color="#e9ecee"
+                roughness={0.45}
+                metalness={0.08}
+                flatShading
+                side={THREE.DoubleSide}
+                transparent
+              />
             </mesh>
             {/* Met mast with anemometer on the roof */}
             <mesh position={[0, 1.55 + 0.55, ROTOR_Z - 3.3]}>
@@ -381,39 +347,75 @@ function TurbineModel({
               <meshStandardMaterial color="#4b5055" roughness={0.6} />
             </mesh>
           </Part>
+          <NacelleInterior progressRef={nacelleP} />
+
           <Part id="generator" labelAt={[0, 4.4, ROTOR_Z - 1.8]}>
             <mesh geometry={geo.generator} castShadow>
-              <meshStandardMaterial color="#e8ebee" roughness={0.4} metalness={0.15} side={THREE.DoubleSide} />
+              <meshStandardMaterial
+                ref={generatorMatRef}
+                color="#e8ebee"
+                roughness={0.4}
+                metalness={0.15}
+                side={THREE.DoubleSide}
+                transparent
+              />
             </mesh>
           </Part>
+          <GeneratorStatic progressRef={generatorP} />
+
           <mesh ref={beaconRef} position={[0, 1.55 + 0.5, ROTOR_Z - 5.4]} visible={false}>
             <sphereGeometry args={[0.45, 16, 12]} />
             <meshBasicMaterial color="#ff2a1a" toneMapped={false} />
           </mesh>
 
-          {/* Rotor: hub + three blades spinning about the shaft (local Z) */}
+          {/* Rotor: hub + generator rotor + three blades spinning about the shaft (local Z) */}
           <group ref={rotorRef} position={[0, 0, ROTOR_Z]}>
             {/* Labels sit on the shaft axis so they stay put while the rotor turns. */}
             <Part id="hub" labelAt={[0, 0, 4.2]}>
               <mesh geometry={geo.spinner} castShadow>
-                <meshStandardMaterial color="#f4f5f6" roughness={0.35} metalness={0.1} side={THREE.DoubleSide} />
+                <meshStandardMaterial
+                  ref={spinnerMatRef}
+                  color="#f4f5f6"
+                  roughness={0.35}
+                  metalness={0.1}
+                  side={THREE.DoubleSide}
+                  transparent
+                />
               </mesh>
             </Part>
+            <GeneratorRotor progressRef={generatorP} />
             <Part id="blades" labelAt={[0, 0, 4.2]}>
-            {[0, 1, 2].map((i) => (
-              <group key={i} rotation={[0, 0, (i * TWO_PI) / 3]}>
-                <mesh
-                  ref={(m) => {
-                    bladeRefs.current[i] = m;
-                  }}
-                  geometry={geo.blade}
-                  castShadow
-                >
-                  <meshStandardMaterial color="#f2f3f4" roughness={0.42} metalness={0.02} side={THREE.DoubleSide} />
-                </mesh>
-              </group>
-            ))}
+              {[0, 1, 2].map((i) => (
+                <group key={i} rotation={[0, 0, (i * TWO_PI) / 3]}>
+                  {/* Pitching group: the blade (and, for blade 0, its internal structure) */}
+                  <group
+                    ref={(g) => {
+                      bladeRefs.current[i] = g;
+                    }}
+                  >
+                    <mesh geometry={geo.blade} castShadow>
+                      <meshStandardMaterial
+                        ref={i === 0 ? inspectedBladeMatRef : undefined}
+                        color="#f2f3f4"
+                        roughness={0.42}
+                        metalness={0.02}
+                        side={THREE.DoubleSide}
+                        transparent={i === 0}
+                      />
+                    </mesh>
+                  </group>
+                </group>
+              ))}
             </Part>
+            {/* Blade 0 internals live outside the "blades" part so they can be hovered on their own. */}
+            <group
+              ref={(g) => {
+                bladeInternalsRef.current = g;
+              }}
+            >
+              <BladeInternalsMemo progressRef={bladesP} />
+            </group>
+            <PitchDriveMemo progressRef={bladesP} />
           </group>
         </group>
       </group>
@@ -577,12 +579,23 @@ const PAN_RADIUS = 7;
 const CameraRig = memo(function CameraRig({
   focus,
   panelOpen,
+  clampToTower,
+  compact,
   workLightYRef,
 }: {
   focus: Focus | null;
   panelOpen: boolean;
+  /** Keep panning inside the tower (while the tower is open). */
+  clampToTower: boolean;
+  /** Phone layout: portrait framing, info panel as a bottom sheet. */
+  compact: boolean;
   workLightYRef: React.RefObject<number>;
 }) {
+  const homeFocus = compact ? HOME_FOCUS_COMPACT : HOME_FOCUS;
+  const compactRef = useRef(compact);
+  compactRef.current = compact;
+  const clampRef = useRef(clampToTower);
+  clampRef.current = clampToTower;
   const controlsRef = useRef<ComponentRef<typeof OrbitControls>>(null);
   const resumeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const camera = useThree((s) => s.camera);
@@ -610,13 +623,19 @@ const CameraRig = memo(function CameraRig({
     if (!controls) return;
     if (firstRun.current) {
       firstRun.current = false;
-      if (!focus) return;
+      if (!focus) {
+        // Start at the overview distance for this layout (further away on a narrow phone screen).
+        const d = camera.position.clone().sub(controls.target);
+        camera.position.copy(controls.target).addScaledVector(d.normalize(), homeFocus.distance);
+        controls.update();
+        return;
+      }
     }
-    const goal = focus ?? HOME_FOCUS;
+    const goal = focus ?? homeFocus;
     const fromTarget = controls.target.clone();
     const toTarget = new THREE.Vector3(...goal.target);
-    // Keep the visitor's current viewing direction; only distance and height change.
-    const dir = camera.position.clone().sub(fromTarget).setY(0);
+    // Use the part's preferred viewing direction, else keep the visitor's current one.
+    const dir = goal.viewDir ? new THREE.Vector3(...goal.viewDir) : camera.position.clone().sub(fromTarget).setY(0);
     if (dir.lengthSq() < 1e-6) dir.set(0, 0, 1);
     dir.normalize();
     const elev = goal.elevationDeg * DEG;
@@ -628,22 +647,28 @@ const CameraRig = memo(function CameraRig({
     clearTimeout(resumeTimer.current);
     controls.autoRotate = false;
     controls.minDistance = 3; // allow close-ups (and don't clamp mid-flight)
-  }, [focus, camera]);
+  }, [focus, camera, homeFocus]);
 
   useFrame((_, delta) => {
     const cam = camera as THREE.PerspectiveCamera;
-    const targetShift = panelOpenRef.current ? PANEL_SHIFT : 0;
+    // Desktop: the panel is on the right → shift the picture left. Phone: the panel is a bottom
+    // sheet → shift the picture up.
+    const targetShift = panelOpenRef.current ? (compactRef.current ? PANEL_SHIFT_COMPACT : PANEL_SHIFT) : 0;
+    const applyShift = () => {
+      if (shiftRef.current === 0) cam.clearViewOffset();
+      else if (compactRef.current) cam.setViewOffset(size.width, size.height, 0, shiftRef.current * size.height, size.width, size.height);
+      else cam.setViewOffset(size.width, size.height, shiftRef.current * size.width, 0, size.width, size.height);
+    };
     if (Math.abs(targetShift - shiftRef.current) > 1e-4) {
       shiftRef.current += (targetShift - shiftRef.current) * approach(Math.min(delta, 0.1), 0.3);
       if (Math.abs(targetShift - shiftRef.current) < 1e-3) shiftRef.current = targetShift;
-      if (shiftRef.current === 0) cam.clearViewOffset();
-      else cam.setViewOffset(size.width, size.height, shiftRef.current * size.width, 0, size.width, size.height);
-    } else if (shiftRef.current !== 0 && cam.view && cam.view.fullWidth !== size.width) {
-      cam.setViewOffset(size.width, size.height, shiftRef.current * size.width, 0, size.width, size.height);
+      applyShift();
+    } else if (shiftRef.current !== 0 && cam.view && (cam.view.fullWidth !== size.width || cam.view.fullHeight !== size.height)) {
+      applyShift();
     }
 
     const controls = controlsRef.current;
-    if (controls && focusedRef.current) {
+    if (controls && focusedRef.current && clampRef.current) {
       // Keep panning inside (and just around) the tower, from the foundation to the nacelle.
       const tg = controls.target;
       const r = Math.hypot(tg.x, tg.z);
@@ -705,7 +730,105 @@ const CameraRig = memo(function CameraRig({
 /* Public component                                                    */
 /* ------------------------------------------------------------------ */
 
-export default function Turbine3D({ className, onExploringChange, ...props }: Turbine3DProps) {
+/* ------------------------------------------------------------------ */
+/* Focus targets given in the nacelle / blade frames → world            */
+/* ------------------------------------------------------------------ */
+
+const AXIS_X = new THREE.Vector3(1, 0, 0);
+const AXIS_Y = new THREE.Vector3(0, 1, 0);
+const AXIS_Z = new THREE.Vector3(0, 0, 1);
+
+/** Nacelle-frame vector → world, for the current yaw (`point`: also translate). */
+function nacelleToWorld(v: THREE.Vector3, yaw: number, point: boolean) {
+  v.applyAxisAngle(AXIS_X, -SHAFT_TILT);
+  if (point) v.y += NACELLE_AXIS_Y;
+  v.applyAxisAngle(AXIS_Y, yaw);
+  if (point) v.y += TOWER_TOP;
+  return v;
+}
+
+function resolveFocus(f: Focus, yaw: number): Focus {
+  const frame = f.frame ?? "world";
+  const target = new THREE.Vector3(...f.target);
+  if (frame === "blade") {
+    // Inspected blade, parked level: blade frame → rotor frame → nacelle frame.
+    target.applyAxisAngle(AXIS_Z, -BLADE_PARK);
+    target.z += ROTOR_Z;
+  }
+  if (frame !== "world") nacelleToWorld(target, yaw, true);
+  let viewDir: [number, number, number] | undefined;
+  if (f.viewDir) {
+    const d = new THREE.Vector3(...f.viewDir);
+    if (frame !== "world") nacelleToWorld(d, yaw, false);
+    d.setY(0).normalize();
+    viewDir = d.toArray() as [number, number, number];
+  }
+  return { target: target.toArray() as [number, number, number], distance: f.distance, elevationDeg: f.elevationDeg, viewDir };
+}
+
+/* ------------------------------------------------------------------ */
+/* Floating signs: project turbine anchor points to the screen          */
+/* ------------------------------------------------------------------ */
+
+function anchorWorld(id: AnchorId, yaw: number, out: THREE.Vector3) {
+  switch (id) {
+    case "hub":
+      return nacelleToWorld(out.set(0, 0, ROTOR_Z), yaw, true);
+    case "nacelle":
+      return nacelleToWorld(out.set(0, 0.8, 0), yaw, true);
+    case "rotorTop":
+      return nacelleToWorld(out.set(0, 0, ROTOR_Z), yaw, true).add(new THREE.Vector3(0, 34, 0));
+    case "towerUpper":
+      return out.set(0, 66, 0);
+    case "towerMid":
+      return out.set(0, 45, 0);
+    case "towerLow":
+      return out.set(0, 22, 0);
+    case "base":
+      return out.set(0, 3, 0);
+  }
+}
+
+function CalloutProjector({
+  registry,
+  yawRef,
+}: {
+  registry: React.RefObject<CalloutRegistry>;
+  yawRef: React.RefObject<number>;
+}) {
+  const v = useMemo(() => new THREE.Vector3(), []);
+  useFrame(({ camera, size }) => {
+    registry.current.forEach((e) => {
+      if (!e.line || !e.dot || !e.card) return;
+      anchorWorld(e.anchor, yawRef.current, v).project(camera);
+      const visible = v.z < 1 && Math.abs(v.x) < 1.2 && Math.abs(v.y) < 1.2;
+      const ax = ((v.x + 1) / 2) * size.width;
+      const ay = ((1 - v.y) / 2) * size.height;
+      // Attach to the card's inner edge, vertically centred.
+      const c = e.card;
+      const cx = e.side === "left" ? c.offsetLeft + c.offsetWidth : c.offsetLeft;
+      const cy = c.offsetTop + c.offsetHeight / 2;
+      e.line.setAttribute("x1", String(cx));
+      e.line.setAttribute("y1", String(cy));
+      e.line.setAttribute("x2", String(ax));
+      e.line.setAttribute("y2", String(ay));
+      e.dot.setAttribute("cx", String(ax));
+      e.dot.setAttribute("cy", String(ay));
+      e.line.style.visibility = visible ? "visible" : "hidden";
+      e.dot.style.visibility = visible ? "visible" : "hidden";
+    });
+  });
+  return null;
+}
+
+export default function Turbine3D({
+  className,
+  onExploringChange,
+  compact = false,
+  callouts,
+  ...props
+}: Turbine3DProps) {
+  const calloutRegistry = useRef<CalloutRegistry>(new Map());
   const [now, setNow] = useState(() => new Date());
   const [canvasKey, setCanvasKey] = useState(0);
 
@@ -723,14 +846,14 @@ export default function Turbine3D({ className, onExploringChange, ...props }: Tu
     liveRef.current = { ...props, nightFactor };
   });
 
-  /* ---------------- Exploration state (hover / select / open tower) ---------------- */
+  /* ---------------- Exploration state (hover / select / open a part) ---------------- */
   const [hoveredId, setHoveredId] = useState<PartId | null>(null);
   const [selectedId, setSelectedId] = useState<PartId | null>(null);
-  const [towerOpen, setTowerOpen] = useState(false);
+  const [openPart, setOpenPart] = useState<OpenableId | null>(null);
   const [focus, setFocus] = useState<Focus | null>(null);
   const workLightYRef = useRef(8);
+  const yawRef = useRef(0);
   const lastInputRef = useRef(Date.now());
-
 
   const setHovered = useCallback((id: PartId | null, from?: PartId) => {
     // `from`: only clear the hover if it still belongs to the part that is leaving.
@@ -740,16 +863,16 @@ export default function Turbine3D({ className, onExploringChange, ...props }: Tu
   const select = useCallback((id: PartId) => {
     lastInputRef.current = Date.now();
     setSelectedId(id);
-    if (id === "tower") {
-      setTowerOpen(true);
-      setFocus({ ...TOWER_OPEN_FOCUS }); // new object: re-fly even if the framing is unchanged
-    } else if (isTowerPart(id)) {
-      setFocus({ ...(PART_INFO[id].focus ?? TOWER_OPEN_FOCUS) });
-    }
+    const info = PART_INFO[id];
+    const opened = info.opens ? (id as OpenableId) : info.parent;
+    if (!opened) return; // e.g. the hub: just show its card
+    setOpenPart(opened);
+    const f = info.focus ?? PART_INFO[opened].focus ?? TOWER_OPEN_FOCUS;
+    setFocus(resolveFocus(f, yawRef.current)); // always a new object: re-fly even if unchanged
   }, []);
 
   const close = useCallback(() => {
-    setTowerOpen(false);
+    setOpenPart(null);
     setSelectedId(null);
     setHoveredId(null);
     setFocus(null);
@@ -758,15 +881,15 @@ export default function Turbine3D({ className, onExploringChange, ...props }: Tu
   const goTo = useCallback((f: Focus) => {
     lastInputRef.current = Date.now();
     setSelectedId("tower");
-    setFocus({ ...f });
+    setFocus(resolveFocus(f, yawRef.current));
   }, []);
 
   const interaction = useMemo<InteractionState>(
-    () => ({ hoveredId, selectedId, towerOpen, setHovered, select }),
-    [hoveredId, selectedId, towerOpen, setHovered, select],
+    () => ({ hoveredId, selectedId, openPart, setHovered, select }),
+    [hoveredId, selectedId, openPart, setHovered, select],
   );
 
-  const exploring = towerOpen || selectedId !== null;
+  const exploring = openPart !== null || selectedId !== null;
   useEffect(() => {
     onExploringChange?.(exploring);
   }, [exploring, onExploringChange]);
@@ -789,12 +912,12 @@ export default function Turbine3D({ className, onExploringChange, ...props }: Tu
   }, [close]);
 
   useEffect(() => {
-    if (!towerOpen && !selectedId) return;
+    if (!openPart && !selectedId) return;
     const id = setInterval(() => {
       if (Date.now() - lastInputRef.current > IDLE_CLOSE_MS) close();
     }, 5_000);
     return () => clearInterval(id);
-  }, [towerOpen, selectedId, close]);
+  }, [openPart, selectedId, close]);
 
   // Recover from a lost GPU context (driver reset, sleep/wake) by remounting the canvas.
   const onCreated = useCallback(({ gl }: RootState) => {
@@ -821,20 +944,30 @@ export default function Turbine3D({ className, onExploringChange, ...props }: Tu
           gl={{ antialias: true, powerPreference: "high-performance" }}
           onCreated={onCreated}
           onPointerMissed={() => {
-            // Tap on empty sky/ground: drop the selection, but keep the tower open.
-            if (!towerOpen) setSelectedId(null);
-            else if (selectedId !== "tower") setSelectedId("tower");
+            // Tap on empty sky/ground: drop the selection, but keep the opened part open.
+            if (!openPart) setSelectedId(null);
+            else if (selectedId !== openPart) setSelectedId(openPart);
           }}
         >
           <Atmosphere elevationDeg={sun.elevationDeg} azimuthDeg={sun.azimuthDeg} />
-          <TurbineModel liveRef={liveRef} workLightYRef={workLightYRef} />
+          <TurbineModel liveRef={liveRef} workLightYRef={workLightYRef} yawOutRef={yawRef} />
           <WindParticles liveRef={liveRef} />
-          <CameraRig focus={focus} panelOpen={exploring} workLightYRef={workLightYRef} />
+          <HoverLabel />
+          {callouts && <CalloutProjector registry={calloutRegistry} yawRef={yawRef} />}
+          <CameraRig
+            focus={focus}
+            panelOpen={exploring}
+            clampToTower={openPart === "tower"}
+            compact={compact}
+            workLightYRef={workLightYRef}
+          />
         </Canvas>
       </InteractionProvider>
+      {callouts && <CalloutLayer callouts={callouts} registry={calloutRegistry} hidden={exploring} />}
       <InfoPanel
+        compact={compact}
         selectedId={selectedId}
-        towerOpen={towerOpen}
+        openPart={openPart}
         onSelect={select}
         onGoTo={goTo}
         onClose={close}

@@ -1,6 +1,5 @@
 "use client";
 
-import { Html } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, type ReactNode } from "react";
 import * as THREE from "three";
@@ -307,7 +306,7 @@ function Ladder() {
 }
 
 function ServiceLift({ visibleRef }: { visibleRef: React.RefObject<boolean> }) {
-  const { selectedId, hoveredId } = useInteraction();
+  const { selectedId } = useInteraction();
   const cabinRef = useRef<THREE.Group>(null);
   const motion = useRef({ y: LIFT_BOTTOM_Y, dir: 1, pause: LIFT_PAUSE_S });
   const parkRef = useRef(false);
@@ -340,7 +339,7 @@ function ServiceLift({ visibleRef }: { visibleRef: React.RefObject<boolean> }) {
 
   const back = -LIFT_D / 2;
   return (
-    <Part id="lift">
+    <Part id="lift" labelAt={[0, LIFT_H + 0.5, 0]} labelAnchorRef={cabinRef}>
       <group
         ref={cabinRef}
         rotation={[0, LADDER_A + Math.PI, 0]}
@@ -386,13 +385,6 @@ function ServiceLift({ visibleRef }: { visibleRef: React.RefObject<boolean> }) {
             <meshStandardMaterial color="#6b7176" metalness={0.5} />
           </mesh>
         ))}
-        {hoveredId === "lift" && (
-          <Html position={[0, LIFT_H + 0.5, 0]} center zIndexRange={[20, 10]} style={{ pointerEvents: "none" }}>
-            <div className="whitespace-nowrap rounded-full bg-slate-950/85 px-4 py-1.5 text-[clamp(0.85rem,1.8vh,1.3rem)] font-semibold text-white shadow-lg ring-1 ring-sky-300/60">
-              Service lift
-            </div>
-          </Html>
-        )}
       </group>
     </Part>
   );
@@ -988,6 +980,27 @@ function DataCables() {
         out.push({ geometry: cableTube(pts, 160, 0.011), colour: DATA_COLOURS[j] });
       }
     });
+    // Up to the nacelle: along the run to the cable tray, up the tray beside the power cables,
+    // then with the hanging loop through the yaw bearing to the nacelle control cabinets.
+    const tT = tangent(TRAY_A);
+    for (let j = 0; j < 3; j++) {
+      const dy = new THREE.Vector3(0, (j - 1) * 0.03, 0);
+      const off = tT.clone().multiplyScalar(-0.165 - j * 0.015);
+      const pts = [
+        start.clone().add(new THREE.Vector3(0, 0.01, 0)).addScaledVector(tangent(CONTROL_A), (j - 1) * 0.06 + 0.15),
+        polar(CONTROL_A, DATA_RUN_R + 0.1, DATA_RUN_Y - 0.25).add(dy),
+        ...arc(TRAY_A + 6 * DEG).map((p) => p.add(dy)),
+        polar(TRAY_A, trayR(3.3), 3.3).add(off),
+        polar(TRAY_A, trayR(40), 40).add(off),
+        polar(TRAY_A, trayR(TRAY_TOP_Y), TRAY_TOP_Y).add(off),
+        polar(TRAY_A, trayR(TRAY_TOP_Y + 1.5) - 0.25, TRAY_TOP_Y + 1.2).add(off),
+        polar(TRAY_A, 0.45, CABLE_LOOP_BOTTOM_Y - 0.4).add(off),
+        new THREE.Vector3(0, CABLE_LOOP_BOTTOM_Y + 1.5, 0).add(off),
+        new THREE.Vector3(0, TOWER_TOP - 3, 0).add(off),
+        new THREE.Vector3(0, TOWER_TOP + 0.6, 0).add(off),
+      ];
+      out.push({ geometry: cableTube(pts, 600, 0.011), colour: DATA_COLOURS[j] });
+    }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

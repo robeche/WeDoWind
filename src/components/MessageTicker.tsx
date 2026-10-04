@@ -13,7 +13,7 @@ export const COMMUNITY_MESSAGES = [
   "Wind is free, local and clean. Every unit made here means less gas burned in power stations.",
 ];
 
-export default function MessageTicker({ intervalMs = 12_000 }: { intervalMs?: number }) {
+export default function MessageTicker({ intervalMs = 12_000, compact = false }: { intervalMs?: number; compact?: boolean }) {
   const [index, setIndex] = useState(0);
 
   useEffect(() => {
@@ -22,9 +22,13 @@ export default function MessageTicker({ intervalMs = 12_000 }: { intervalMs?: nu
   }, [intervalMs]);
 
   return (
-    <div className="flex items-center gap-4 overflow-hidden rounded-2xl bg-emerald-500/15 px-6 py-[1.4vh] ring-1 ring-emerald-400/30">
-      <Info className="size-[3.6vh] shrink-0 text-emerald-300" strokeWidth={2.4} />
-      <div className="relative min-h-[4.2vh] flex-1">
+    <div
+      className={`flex items-center overflow-hidden rounded-2xl ring-1 ring-emerald-400/30 ${
+        compact ? "gap-2 bg-slate-950/70 px-3 py-2 backdrop-blur" : "gap-4 bg-emerald-500/15 px-6 py-[1.4vh]"
+      }`}
+    >
+      <Info className={`shrink-0 text-emerald-300 ${compact ? "size-4" : "size-[3.6vh]"}`} strokeWidth={2.4} />
+      <div className={`relative flex-1 ${compact ? "min-h-[2.5rem]" : "min-h-[4.2vh]"}`}>
         <AnimatePresence mode="wait">
           <motion.p
             key={index}
@@ -32,7 +36,7 @@ export default function MessageTicker({ intervalMs = 12_000 }: { intervalMs?: nu
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -40 }}
             transition={{ duration: 0.6, ease: "easeOut" }}
-            className="text-[clamp(1.1rem,2.9vh,2.3rem)] font-semibold leading-snug"
+            className={compact ? "text-[0.8rem] font-medium leading-snug" : "text-[clamp(1.1rem,2.9vh,2.3rem)] font-semibold leading-snug"}
           >
             {COMMUNITY_MESSAGES[index]}
           </motion.p>

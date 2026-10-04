@@ -22,3 +22,22 @@ body {
 canvas {
   touch-action: none;
 }
+
+/* Gentle bobbing for the floating data signs (mobile layout). */
+@keyframes float-sign {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-5px);
+  }
+}
+.animate-float {
+  animation: float-sign 6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-float {
+    animation: none;
+  }
+}
