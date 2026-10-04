@@ -8,22 +8,26 @@ import type { TurbineStatus } from "@/services/aceApi";
 import { sunPosition } from "@/utils/sun";
 
 /* ------------------------------------------------------------------ */
-/* Geometry constants — ENERCON E-138 EP3 E2 (4.2 MW), 1 unit = 1 m    */
-/* Lawrence Weston: ~81 m hub, 138 m rotor, ~150 m tip height.         */
+/* Geometry constants — ENERCON E-115 E3 (4.2 MW), 1 unit = 1 m        */
+/* Lawrence Weston: 115.7 m rotor, 56 m blades, ~92 m hub, 150 m tip.  */
 /* ------------------------------------------------------------------ */
 
 const DEG = Math.PI / 180;
 const TWO_PI = Math.PI * 2;
-const TOWER_TOP = 77.5;
-const TOWER_BASE_R = 3.3;
-const TOWER_TOP_R = 1.9;
-const NACELLE_AXIS_Y = 3.5; // hub height = 81 m
-const ROTOR_RADIUS = 69;
-const BLADE_ROOT_R = 1.6;
+const TIP_HEIGHT = 150;
+const ROTOR_RADIUS = 115.7 / 2; // 57.85 m
+const BLADE_LENGTH = 56;
+const BLADE_ROOT_R = ROTOR_RADIUS - BLADE_LENGTH; // 1.85 m
+const HUB_HEIGHT = TIP_HEIGHT - ROTOR_RADIUS; // 92.15 m
+const NACELLE_AXIS_Y = 3.05;
+const TOWER_TOP = HUB_HEIGHT - NACELLE_AXIS_Y; // 89.1 m
+const TOWER_BASE_R = 2.9;
+const TOWER_TOP_R = 1.65;
 const SHAFT_TILT = 5 * DEG;
-const ROTOR_Z = 3.4;
+/** Distance from the tower axis to the rotor centre (rotor is upwind, +Z). */
+const ROTOR_Z = 4.6;
 
-const CAMERA_TARGET: [number, number, number] = [0, 70, 0];
+const CAMERA_TARGET: [number, number, number] = [0, 78, 0];
 const AUTO_ORBIT_RESUME_MS = 15_000;
 /** Wind particles move at live wind speed × this factor (m/s → scene m/s). */
 const WIND_PARTICLE_SPEED_SCALE = 2.5;
@@ -62,10 +66,10 @@ interface LiveInputs extends Omit<Turbine3DProps, "className"> {
 function createBladeGeometry(rootR: number, tipR: number): THREE.BufferGeometry {
   const SECTIONS = 48;
   const RING = 32;
-  const ROOT_DIAMETER = 2.8;
-  const MAX_CHORD = 4.2;
-  const MAX_CHORD_T = 0.18;
-  const TIP_CHORD = 0.45;
+  const ROOT_DIAMETER = 2.7;
+  const MAX_CHORD = 4.1;
+  const MAX_CHORD_T = 0.2;
+  const TIP_CHORD = 0.3;
   const span = tipR - rootR;
 
   const positions: number[] = [];
@@ -84,7 +88,7 @@ function createBladeGeometry(rootR: number, tipR: number): THREE.BufferGeometry 
       t < MAX_CHORD_T ? lerp(1, 0.4, smoothstep(t, 0.02, MAX_CHORD_T)) : lerp(0.4, 0.16, smoothstep(t, MAX_CHORD_T, 0.65));
     const twistDeg = t < MAX_CHORD_T ? 14 : 14 - 15 * Math.pow((t - MAX_CHORD_T) / (1 - MAX_CHORD_T), 0.7);
     const phi = twistDeg * DEG;
-    const prebend = 2.2 * t * t;
+    const prebend = 1.8 * t * t;
     const pivot = lerp(0.5, 0.35, aerofoilBlend);
 
     // u: leading-edge direction, v: suction-side direction (both in the XZ plane).
@@ -148,27 +152,70 @@ function latheAlongZ(profile: Array<[number, number]>, segments = 48): THREE.Buf
   return geometry;
 }
 
+/**
+ * EP3-style rear nacelle: a short faceted box (flat roof, vertical sides, large lower
+ * chamfers, chamfered tail) rather than the older rounded "egg" ENERCON nacelle.
+ * Built in the shaft frame: +Z towards the rotor, +Y up. Use with flatShading.
+ */
+function createNacelleGeometry(): THREE.BufferGeometry {
+  // [z, halfWidth, top, bottom, topChamfer, bottomChamfer]
+  const sections: Array<[number, number, number, number, number, number]> = [
+    [ROTOR_Z - 2.7, 2.05, 1.55, -2.65, 0.35, 0.95],
+    [ROTOR_Z - 5.6, 2.05, 1.55, -2.65, 0.35, 0.95],
+    [ROTOR_Z - 6.7, 1.8, 1.3, -1.55, 0.3, 0.7],
+    [ROTOR_Z - 7.05, 1.55, 1.0, -0.95, 0.25, 0.5],
+  ];
+  const ring = ([z, w, top, bot, ct, cb]: (typeof sections)[number]) => [
+    [-w + ct, top, z], [w - ct, top, z], [w, top - ct, z], [w, bot + cb, z],
+    [w - cb, bot, z], [-w + cb, bot, z], [-w, bot + cb, z], [-w, top - ct, z],
+  ];
+  const rings = sections.map(ring);
+  const n = rings[0].length;
+  const positions = rings.flat(2);
+  const indices: number[] = [];
+  for (let s = 0; s < rings.length - 1; s++) {
+    for (let i = 0; i < n; i++) {
+      const a = s * n + i;
+      const b = s * n + ((i + 1) % n);
+      const c = (s + 1) * n + i;
+      const d = (s + 1) * n + ((i + 1) % n);
+      // Rings run clockwise seen from upwind, so this winding gives outward normals.
+      indices.push(a, b, c, b, d, c);
+    }
+  }
+  // End caps (front one sits inside the generator).
+  const lastRing = (rings.length - 1) * n;
+  for (let i = 1; i < n - 1; i++) {
+    indices.push(0, i + 1, i);
+    indices.push(lastRing, lastRing + i, lastRing + i + 1);
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setIndex(indices);
+  const flat = geometry.toNonIndexed();
+  flat.computeVertexNormals();
+  geometry.dispose();
+  return flat;
+}
+
 function useTurbineGeometries() {
   const geometries = useMemo(() => {
-    const spinnerProfile: Array<[number, number]> = [[2.45, -0.9]];
-    for (let i = 0; i <= 16; i++) {
-      const z = (i / 16) * 4.4;
-      spinnerProfile.push([2.4 * Math.sqrt(Math.max(0, 1 - (z / 4.4) ** 2)), z]);
-    }
+    // Compact spinner: rotor-local Z, nose upwind (+Z).
+    const spinnerProfile: Array<[number, number]> = [
+      [0, -1.0], [2.1, -0.95], [2.15, -0.75], [2.12, 0], [1.95, 0.9],
+      [1.65, 1.6], [1.25, 2.15], [0.8, 2.5], [0.35, 2.7], [0, 2.75],
+    ];
+    // Direct-drive ring generator: wide disc with flat faces and bevelled rims.
+    const g0 = ROTOR_Z - 2.75;
+    const g1 = ROTOR_Z - 0.9;
+    const generatorProfile: Array<[number, number]> = [
+      [0, g0], [2.95, g0], [3.2, g0 + 0.2], [3.2, g1 - 0.15], [2.95, g1], [0, g1],
+    ];
     return {
       blade: createBladeGeometry(BLADE_ROOT_R, ROTOR_RADIUS),
-      spinner: latheAlongZ(spinnerProfile),
-      nacelle: latheAlongZ([
-        [0, -10.4],
-        [1.2, -10.3],
-        [2.0, -9.6],
-        [2.5, -8],
-        [2.75, -5],
-        [2.85, -1.5],
-        [2.85, 0.2],
-        [0, 0.2],
-      ]),
-      generator: new THREE.CylinderGeometry(3.15, 3.15, 2.2, 64).rotateX(Math.PI / 2),
+      spinner: latheAlongZ(spinnerProfile, 64),
+      nacelle: createNacelleGeometry(),
+      generator: latheAlongZ(generatorProfile, 96),
       tower: new THREE.CylinderGeometry(TOWER_TOP_R, TOWER_BASE_R, TOWER_TOP, 64, 1),
     };
   }, []);
@@ -193,13 +240,6 @@ function targetPitchRad(live: LiveInputs): number {
       return 88 * DEG;
   }
 }
-
-const towerRadiusAt = (y: number) => TOWER_BASE_R + (TOWER_TOP_R - TOWER_BASE_R) * (y / TOWER_TOP);
-const TOWER_BANDS = ["#0b5d33", "#177a42", "#2f9a55", "#5bb872", "#98d5a6"].map((color, i) => {
-  const y0 = i * 2.2;
-  const y1 = y0 + 2.2;
-  return { color, y: (y0 + y1) / 2, h: 2.2, rBottom: towerRadiusAt(y0) + 0.03, rTop: towerRadiusAt(y1) + 0.03 };
-});
 
 function TurbineModel({ liveRef }: { liveRef: React.RefObject<LiveInputs> }) {
   const geo = useTurbineGeometries();
@@ -251,31 +291,36 @@ function TurbineModel({ liveRef }: { liveRef: React.RefObject<LiveInputs> }) {
         <cylinderGeometry args={[7, 7.4, 0.6, 48]} />
         <meshStandardMaterial color="#9aa0a6" roughness={0.95} />
       </mesh>
+      {/* Plain light-grey tower (no green base bands on the Lawrence Weston turbine) */}
       <mesh geometry={geo.tower} position={[0, TOWER_TOP / 2, 0]} castShadow receiveShadow>
         <meshStandardMaterial color="#e4e7ea" roughness={0.6} metalness={0.05} />
       </mesh>
-      {TOWER_BANDS.map((band) => (
-        <mesh key={band.color} position={[0, band.y, 0]}>
-          <cylinderGeometry args={[band.rTop, band.rBottom, band.h, 64, 1, true]} />
-          <meshStandardMaterial color={band.color} roughness={0.55} />
-        </mesh>
-      ))}
+      {/* Tower door */}
+      <mesh position={[0, 1.75, TOWER_BASE_R - 0.02]}>
+        <boxGeometry args={[1.1, 2.3, 0.12]} />
+        <meshStandardMaterial color="#5f6468" roughness={0.6} />
+      </mesh>
 
       {/* Yaw system: everything above the tower top rotates about Y */}
       <group ref={yawRef} position={[0, TOWER_TOP, 0]}>
-        <mesh position={[0, 1.2, -1]} castShadow>
-          <cylinderGeometry args={[2.1, 2.1, 2.4, 48]} />
+        <mesh position={[0, 0.35, 0]} castShadow>
+          <cylinderGeometry args={[TOWER_TOP_R + 0.05, TOWER_TOP_R + 0.05, 0.7, 48]} />
           <meshStandardMaterial color="#d9dde1" roughness={0.5} />
         </mesh>
 
         <group position={[0, NACELLE_AXIS_Y, 0]} rotation={[-SHAFT_TILT, 0, 0]}>
           <mesh geometry={geo.nacelle} castShadow receiveShadow>
-            <meshStandardMaterial color="#eef0f2" roughness={0.45} metalness={0.08} side={THREE.DoubleSide} />
+            <meshStandardMaterial color="#e9ecee" roughness={0.45} metalness={0.08} flatShading side={THREE.DoubleSide} />
           </mesh>
-          <mesh geometry={geo.generator} position={[0, 0, 1.3]} castShadow>
-            <meshStandardMaterial color="#e8ebee" roughness={0.4} metalness={0.15} />
+          <mesh geometry={geo.generator} castShadow>
+            <meshStandardMaterial color="#e8ebee" roughness={0.4} metalness={0.15} side={THREE.DoubleSide} />
           </mesh>
-          <mesh ref={beaconRef} position={[0, 2.95, -8.5]} visible={false}>
+          {/* Met mast with anemometer on the roof */}
+          <mesh position={[0, 1.55 + 0.55, ROTOR_Z - 3.3]}>
+            <cylinderGeometry args={[0.05, 0.05, 1.1, 8]} />
+            <meshStandardMaterial color="#4b5055" roughness={0.6} />
+          </mesh>
+          <mesh ref={beaconRef} position={[0, 1.55 + 0.5, ROTOR_Z - 5.4]} visible={false}>
             <sphereGeometry args={[0.45, 16, 12]} />
             <meshBasicMaterial color="#ff2a1a" toneMapped={false} />
           </mesh>
@@ -518,7 +563,7 @@ export default function Turbine3D({ className, ...props }: Turbine3DProps) {
         key={canvasKey}
         shadows
         dpr={[1, 1.75]}
-        camera={{ position: [190, 60, 215], fov: 38, near: 1, far: 5000 }}
+        camera={{ position: [175, 60, 200], fov: 38, near: 1, far: 5000 }}
         gl={{ antialias: true, powerPreference: "high-performance" }}
         onCreated={onCreated}
       >

@@ -12,7 +12,7 @@ export const ACE_TURBINE_ASSET_ID = "wec-1";
 export const RATED_POWER_KW = 4200;
 
 const UPSTREAM_TIMEOUT_MS = 6000;
-const STALE_AFTER_MS = 5 * 60 * 1000;
+export const STALE_AFTER_MS = 5 * 60 * 1000;
 const USER_AGENT = "ACE-Community-Kiosk/1.0 (WeDoWind Challenge 5)";
 
 /* ------------------------------------------------------------------ */
@@ -139,8 +139,10 @@ export interface HistorySeries {
   hours: number;
   resolutionSeconds: number;
   points: HistoryPoint[];
-  /** Energy generated over the window, kWh (integrated from 10-minute means). */
+  /** Energy generated over the window, kWh (turbine energy counter; falls back to integrating 10-minute means). */
   energyKwh: number;
+  /** How energyKwh was obtained. */
+  energySource: "counter" | "integrated";
   fetchedAt: string;
 }
 
@@ -288,13 +290,14 @@ export async function fetchUpstreamHistory(hours: number): Promise<HistorySeries
   const path = `/v1/sites/${ACE_SITE_ID}/assets/${ACE_TURBINE_ASSET_ID}/data/wecstd/range`;
 
   const points: HistoryPoint[] = [];
+  const counter: Array<{ t: number; kwh: number }> = [];
   let resolutionSeconds = 600;
   let cursor: string | null | undefined;
 
   for (let page = 0; page < 5; page++) {
     const params: Record<string, string> = {
       resolution: "10m",
-      fields: "active_power_mean,wind_speed_mean",
+      fields: "active_power_mean,wind_speed_mean,energy_produced",
       start: start.toISOString(),
       end: end.toISOString(),
       page_size: "500",
@@ -305,7 +308,9 @@ export async function fetchUpstreamHistory(hours: number): Promise<HistorySeries
     resolutionSeconds = res.resolution_seconds ?? resolutionSeconds;
     const p = res.series?.active_power_mean ?? [];
     const w = res.series?.wind_speed_mean ?? [];
+    const e = res.series?.energy_produced ?? [];
     res.timestamps.forEach((ts, i) => {
+      if (isFiniteNumber(e[i])) counter.push({ t: ts / 1000, kwh: e[i] as number });
       points.push({
         t: ts / 1000,
         powerKw: isFiniteNumber(p[i]) ? Math.max(0, p[i] as number) : null,
@@ -318,10 +323,27 @@ export async function fetchUpstreamHistory(hours: number): Promise<HistorySeries
   }
 
   points.sort((a, b) => a.t - b.t);
-  const hoursPerPoint = resolutionSeconds / 3600;
-  const energyKwh = points.reduce((sum, pt) => sum + (pt.powerKw ?? 0) * hoursPerPoint, 0);
+  counter.sort((a, b) => a.t - b.t);
 
-  return { hours, resolutionSeconds, points, energyKwh, fetchedAt: new Date().toISOString() };
+  // Preferred: difference of the turbine's cumulative "energy produced" counter. It is exact and
+  // unaffected by gaps in the 10-minute means. Fall back to integration if the counter is missing,
+  // covers less than 80 % of the window, or looks implausible (reset / > rated power).
+  const hoursPerPoint = resolutionSeconds / 3600;
+  const integrated = points.reduce((sum, pt) => sum + (pt.powerKw ?? 0) * hoursPerPoint, 0);
+  let energyKwh = integrated;
+  let energySource: HistorySeries["energySource"] = "integrated";
+  if (counter.length >= 2) {
+    const first = counter[0];
+    const last = counter[counter.length - 1];
+    const delta = last.kwh - first.kwh;
+    const spanH = (last.t - first.t) / 3_600_000;
+    if (delta >= 0 && spanH >= hours * 0.8 && delta <= RATED_POWER_KW * spanH * 1.05) {
+      energyKwh = delta;
+      energySource = "counter";
+    }
+  }
+
+  return { hours, resolutionSeconds, points, energyKwh, energySource, fetchedAt: new Date().toISOString() };
 }
 
 /* ------------------------------------------------------------------ */

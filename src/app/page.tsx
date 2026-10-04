@@ -12,6 +12,7 @@ import {
   RefreshCw,
   RotateCw,
   Wind,
+  Zap,
   type LucideIcon,
 } from "lucide-react";
 import dynamic from "next/dynamic";
@@ -25,7 +26,13 @@ import SafeBoundary from "@/components/SafeBoundary";
 import { useFullscreen, useIdleCursor, useKioskMaintenance, useNow } from "@/hooks/useKiosk";
 import { useLiveTurbine, useTurbineHistory } from "@/hooks/useTurbineData";
 import type { TurbineStatus } from "@/services/aceApi";
-import { compassPoint, computeCommunityMetrics, describeWind } from "@/utils/metrics";
+import {
+  COMMUNITY_FUND_GBP_PER_KWH,
+  UK_HOUSEHOLD_KWH_PER_YEAR,
+  compassPoint,
+  computeCommunityMetrics,
+  describeWind,
+} from "@/utils/metrics";
 import { formatUkDate, formatUkTime } from "@/utils/sun";
 
 const Turbine3D = dynamic(() => import("@/components/Turbine3D"), {
@@ -255,19 +262,39 @@ export default function KioskPage() {
                 {ready ? <AnimatedNumber value={metrics.homesPowered} /> : dash}
               </MetricCard>
 
-              <MetricCard
-                icon={HandCoins}
-                title="Raising for Lawrence Weston"
-                accent="bg-pink-400 text-slate-950"
-                caption={
-                  metrics.fundGbp24h !== null
-                    ? `About £${Math.round(metrics.fundGbp24h).toLocaleString("en-GB")} in the last 24 hours*`
-                    : "estimated community fund*"
-                }
-              >
-                {ready ? <AnimatedNumber value={metrics.fundGbpPerHour} decimals={2} prefix="£" /> : dash}
-                <span className="text-[0.45em] font-bold text-white/70"> an hour</span>
-              </MetricCard>
+              {metrics.fundGbpPerHour !== null ? (
+                <MetricCard
+                  icon={HandCoins}
+                  title="Raising for Lawrence Weston"
+                  accent="bg-pink-400 text-slate-950"
+                  caption={
+                    metrics.fundGbp24h !== null
+                      ? `About £${Math.round(metrics.fundGbp24h).toLocaleString("en-GB")} in the last 24 hours*`
+                      : "estimated community fund*"
+                  }
+                >
+                  {ready ? <AnimatedNumber value={metrics.fundGbpPerHour} decimals={2} prefix="£" /> : dash}
+                  <span className="text-[0.45em] font-bold text-white/70"> an hour</span>
+                </MetricCard>
+              ) : (
+                <MetricCard
+                  icon={Zap}
+                  title="Generated since switch-on"
+                  accent="bg-pink-400 text-slate-950"
+                  caption={
+                    metrics.lifetimeMwh !== null
+                      ? `enough for about ${Math.round((metrics.lifetimeMwh * 1000) / UK_HOUSEHOLD_KWH_PER_YEAR).toLocaleString("en-GB")} homes for a whole year`
+                      : "total clean electricity produced"
+                  }
+                >
+                  {ready && metrics.lifetimeMwh !== null ? (
+                    <AnimatedNumber value={metrics.lifetimeMwh / 1000} decimals={2} />
+                  ) : (
+                    dash
+                  )}
+                  <span className="text-[0.45em] font-bold text-white/70"> GWh</span>
+                </MetricCard>
+              )}
 
               <MetricCard
                 icon={Leaf}
@@ -294,7 +321,8 @@ export default function KioskPage() {
       <footer className="flex items-center justify-between gap-6 text-[clamp(0.75rem,1.6vh,1.2rem)] text-white/55">
         <span>Live data provided by Ambition Community Energy (ACE) under CC-BY-4.0 | WeDoWind Challenge 5</span>
         <span className="text-right">
-          Data DOI 10.5281/zenodo.22662372 · *Community fund figures are estimates
+          Data DOI 10.5281/zenodo.22662372
+          {COMMUNITY_FUND_GBP_PER_KWH !== null && " · *Community fund figures are estimates"}
         </span>
       </footer>
 

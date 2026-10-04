@@ -7,8 +7,17 @@
 import type { HistorySeries, LiveSnapshot } from "@/services/aceApi";
 import { RATED_POWER_KW } from "@/services/aceApi";
 
-/** Average UK household: ~3,900 kWh/year ÷ 8,760 h ≈ 0.45 kW continuous. */
-export const UK_HOUSEHOLD_AVG_KW = 0.45;
+/**
+ * Typical UK household electricity use, kWh/year. Default = Ofgem Typical Domestic
+ * Consumption Value (2,500 kWh from 1 July 2026; it was 2,700 kWh before).
+ * Override with NEXT_PUBLIC_HOUSEHOLD_KWH_PER_YEAR.
+ */
+export const UK_HOUSEHOLD_KWH_PER_YEAR = (() => {
+  const v = Number.parseFloat(process.env.NEXT_PUBLIC_HOUSEHOLD_KWH_PER_YEAR ?? "");
+  return Number.isFinite(v) && v > 0 ? v : 2500;
+})();
+/** Average household as a continuous load: 2,500 kWh ÷ 8,760 h ≈ 0.285 kW. */
+export const UK_HOUSEHOLD_AVG_KW = UK_HOUSEHOLD_KWH_PER_YEAR / 8760;
 /** UK National Grid displacement average, kg CO2 per kWh. */
 export const GRID_CARBON_KG_PER_KWH = 0.21;
 /** Typical UK kettle element rating. */
@@ -21,17 +30,19 @@ export const PHONE_CHARGE_KWH = 0.015;
 export const LED_BULB_KW = 0.01;
 
 /**
- * Estimated surplus flowing to Ambition Lawrence Weston per kWh generated.
- * Illustrative default — set NEXT_PUBLIC_COMMUNITY_FUND_GBP_PER_KWH to ACE's published figure.
+ * Surplus flowing to Ambition Lawrence Weston per kWh generated, GBP.
+ * There is deliberately no default: the community-fund card is only shown once
+ * NEXT_PUBLIC_COMMUNITY_FUND_GBP_PER_KWH is set to ACE's published figure.
+ * Until then the kiosk shows lifetime energy generated instead.
  */
-export const COMMUNITY_FUND_GBP_PER_KWH = (() => {
+export const COMMUNITY_FUND_GBP_PER_KWH: number | null = (() => {
   const v = Number.parseFloat(process.env.NEXT_PUBLIC_COMMUNITY_FUND_GBP_PER_KWH ?? "");
-  return Number.isFinite(v) && v >= 0 ? v : 0.01;
+  return Number.isFinite(v) && v >= 0 ? v : null;
 })();
 
 const safe = (kw: number) => (Number.isFinite(kw) && kw > 0 ? kw : 0);
 
-/** Homes powered right now = kW / 0.45 kW. */
+/** Homes powered right now = kW / average household load (≈0.285 kW). */
 export const homesPowered = (kw: number) => safe(kw) / UK_HOUSEHOLD_AVG_KW;
 
 /** CO2 avoided per hour at the current output = kW × 0.21 kg/kWh. */
@@ -49,11 +60,13 @@ export const phoneChargesPerHour = (kw: number) => safe(kw) / PHONE_CHARGE_KWH;
 /** LED bulbs that could be lit right now. */
 export const ledBulbsLit = (kw: number) => safe(kw) / LED_BULB_KW;
 
-/** Estimated community fund generated per hour at this output (GBP). */
-export const communityFundGbpPerHour = (kw: number) => safe(kw) * COMMUNITY_FUND_GBP_PER_KWH;
+/** Estimated community fund generated per hour at this output (GBP), or null if not configured. */
+export const communityFundGbpPerHour = (kw: number) =>
+  COMMUNITY_FUND_GBP_PER_KWH === null ? null : safe(kw) * COMMUNITY_FUND_GBP_PER_KWH;
 
-/** Estimated community fund for a given amount of energy (GBP). */
-export const communityFundGbp = (kwh: number) => safe(kwh) * COMMUNITY_FUND_GBP_PER_KWH;
+/** Estimated community fund for a given amount of energy (GBP), or null if not configured. */
+export const communityFundGbp = (kwh: number) =>
+  COMMUNITY_FUND_GBP_PER_KWH === null ? null : safe(kwh) * COMMUNITY_FUND_GBP_PER_KWH;
 
 /** Share of the 4.2 MW rated capacity currently being produced (0–1). */
 export const capacityShare = (kw: number) => Math.min(1, safe(kw) / RATED_POWER_KW);
@@ -72,7 +85,10 @@ export interface CommunityMetrics {
   capacityShare: number;
   homesPowered: number;
   co2KgPerHour: number;
-  fundGbpPerHour: number;
+  /** Null when no community-fund rate is configured. */
+  fundGbpPerHour: number | null;
+  /** Lifetime energy generated, MWh (from the turbine's export counter). */
+  lifetimeMwh: number | null;
   /** Rolling 24 h figures (null until history has loaded). */
   energy24hKwh: number | null;
   co2Tonnes24h: number | null;
@@ -81,7 +97,7 @@ export interface CommunityMetrics {
 }
 
 export function computeCommunityMetrics(
-  live: Pick<LiveSnapshot, "activePowerKw"> | null | undefined,
+  live: Pick<LiveSnapshot, "activePowerKw" | "energyExportedKwh"> | null | undefined,
   history?: Pick<HistorySeries, "energyKwh"> | null,
 ): CommunityMetrics {
   const kw = safe(live?.activePowerKw ?? 0);
@@ -93,6 +109,10 @@ export function computeCommunityMetrics(
     homesPowered: homesPowered(kw),
     co2KgPerHour: co2AvoidedKgPerHour(kw),
     fundGbpPerHour: communityFundGbpPerHour(kw),
+    lifetimeMwh:
+      live?.energyExportedKwh != null && Number.isFinite(live.energyExportedKwh) && live.energyExportedKwh > 0
+        ? live.energyExportedKwh / 1000
+        : null,
     energy24hKwh,
     co2Tonnes24h: energy24hKwh === null ? null : (energy24hKwh * GRID_CARBON_KG_PER_KWH) / 1000,
     fundGbp24h: energy24hKwh === null ? null : communityFundGbp(energy24hKwh),

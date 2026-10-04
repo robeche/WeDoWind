@@ -38,6 +38,22 @@ npm run build
 npm run start
 ```
 
+## The turbine
+
+ENERCON E-115 E3, 4.2 MW: 115.7 m rotor (56 m blades), ~92 m hub height, 150 m to the blade tip.
+The 3D twin in `src/components/Turbine3D.tsx` is built to these dimensions (1 unit = 1 m), with the
+EP3-style faceted nacelle and ring generator.
+
+## Configuration
+
+Copy `.env.example` to `.env.local`:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `ACE_API_BASE_URL` | `https://ace-api.duckdns.org` | Upstream ACE API (server only) |
+| `NEXT_PUBLIC_HOUSEHOLD_KWH_PER_YEAR` | `2500` | Household use for "homes powered" (Ofgem TDCV) |
+| `NEXT_PUBLIC_COMMUNITY_FUND_GBP_PER_KWH` | *(unset)* | Shows the community-fund card when set; otherwise lifetime energy is shown |
+
 ## Environment notes
 
 The app fetches live data through the project’s API routes rather than directly from the browser, so it avoids client-side CORS and mixed-content issues.
