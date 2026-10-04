@@ -1,34 +1,36 @@
 "use client";
 
 import { OrbitControls, Sky, Stars } from "@react-three/drei";
-import { Canvas, useFrame, type RootState } from "@react-three/fiber";
+import { Canvas, useFrame, useThree, type RootState } from "@react-three/fiber";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ComponentRef } from "react";
 import * as THREE from "three";
 import type { TurbineStatus } from "@/services/aceApi";
 import { sunPosition } from "@/utils/sun";
 
-/* ------------------------------------------------------------------ */
-/* Geometry constants — ENERCON E-115 E3 (4.2 MW), 1 unit = 1 m        */
-/* Lawrence Weston: 115.7 m rotor, 56 m blades, ~92 m hub, 150 m tip.  */
-/* ------------------------------------------------------------------ */
-
-const DEG = Math.PI / 180;
-const TWO_PI = Math.PI * 2;
-const TIP_HEIGHT = 150;
-const ROTOR_RADIUS = 115.7 / 2; // 57.85 m
-const BLADE_LENGTH = 56;
-const BLADE_ROOT_R = ROTOR_RADIUS - BLADE_LENGTH; // 1.85 m
-const HUB_HEIGHT = TIP_HEIGHT - ROTOR_RADIUS; // 92.15 m
-const NACELLE_AXIS_Y = 3.05;
-const TOWER_TOP = HUB_HEIGHT - NACELLE_AXIS_Y; // 89.1 m
-const TOWER_BASE_R = 2.9;
-const TOWER_TOP_R = 1.65;
-const SHAFT_TILT = 5 * DEG;
-/** Distance from the tower axis to the rotor centre (rotor is upwind, +Z). */
-const ROTOR_Z = 4.6;
+import {
+  BLADE_ROOT_R,
+  DEG,
+  NACELLE_AXIS_Y,
+  ROTOR_RADIUS,
+  ROTOR_Z,
+  SHAFT_TILT,
+  TOWER_BASE_R,
+  TOWER_TOP,
+  TOWER_TOP_R,
+  TWO_PI,
+} from "./turbine/dimensions";
+import InfoPanel from "./turbine/InfoPanel";
+import { InteractionProvider, Part, useInteraction, type InteractionState } from "./turbine/interaction";
+import { TOWER_OPEN_FOCUS, isTowerPart, PART_INFO, type Focus, type PartId } from "./turbine/parts";
+import TowerInterior from "./turbine/TowerInterior";
 
 const CAMERA_TARGET: [number, number, number] = [0, 78, 0];
+const HOME_FOCUS: Focus = { target: CAMERA_TARGET, distance: 270, elevationDeg: 5 };
 const AUTO_ORBIT_RESUME_MS = 15_000;
+/** Fraction of the canvas width the picture shifts left while the info panel is open. */
+const PANEL_SHIFT = 0.2;
+/** A public kiosk should not stay "opened" forever: close after this long without input. */
+const IDLE_CLOSE_MS = 90_000;
 /** Wind particles move at live wind speed × this factor (m/s → scene m/s). */
 const WIND_PARTICLE_SPEED_SCALE = 2.5;
 
@@ -48,9 +50,11 @@ export interface Turbine3DProps {
   status: TurbineStatus;
   hasData: boolean;
   className?: string;
+  /** Called when a visitor starts / stops exploring (a part selected or the tower open). */
+  onExploringChange?: (exploring: boolean) => void;
 }
 
-interface LiveInputs extends Omit<Turbine3DProps, "className"> {
+interface LiveInputs extends Omit<Turbine3DProps, "className" | "onExploringChange"> {
   nightFactor: number;
 }
 
@@ -216,7 +220,10 @@ function useTurbineGeometries() {
       spinner: latheAlongZ(spinnerProfile, 64),
       nacelle: createNacelleGeometry(),
       generator: latheAlongZ(generatorProfile, 96),
-      tower: new THREE.CylinderGeometry(TOWER_TOP_R, TOWER_BASE_R, TOWER_TOP, 64, 1),
+      // Tower shell in two halves (open-ended, seen from both sides) so it can be cut away.
+      // θ = 0 is +Z: the "front" half is centred on +Z and is turned to face the camera.
+      towerFront: new THREE.CylinderGeometry(TOWER_TOP_R, TOWER_BASE_R, TOWER_TOP, 40, 1, true, -Math.PI / 2, Math.PI),
+      towerBack: new THREE.CylinderGeometry(TOWER_TOP_R, TOWER_BASE_R, TOWER_TOP, 40, 1, true, Math.PI / 2, Math.PI),
     };
   }, []);
 
@@ -241,13 +248,29 @@ function targetPitchRad(live: LiveInputs): number {
   }
 }
 
-function TurbineModel({ liveRef }: { liveRef: React.RefObject<LiveInputs> }) {
+function TurbineModel({
+  liveRef,
+  workLightYRef,
+}: {
+  liveRef: React.RefObject<LiveInputs>;
+  workLightYRef: React.RefObject<number>;
+}) {
   const geo = useTurbineGeometries();
   const yawRef = useRef<THREE.Group>(null);
   const rotorRef = useRef<THREE.Group>(null);
   const bladeRefs = useRef<Array<THREE.Mesh | null>>([]);
   const beaconRef = useRef<THREE.Mesh>(null);
   const sim = useRef({ rpm: 0, theta: 0, yaw: Math.PI - 225 * DEG, yawInitialised: false, pitch: 88 * DEG });
+
+  // Tower cut-away state.
+  const { towerOpen } = useInteraction();
+  const openRef = useRef(towerOpen);
+  openRef.current = towerOpen;
+  const progressRef = useRef(0);
+  const shellRef = useRef<THREE.Group>(null);
+  const frontRef = useRef<THREE.Mesh>(null);
+  const frontMatRef = useRef<THREE.MeshStandardMaterial>(null);
+  const doorRef = useRef<THREE.Mesh>(null);
 
   useFrame((state, delta) => {
     const live = liveRef.current;
@@ -278,6 +301,25 @@ function TurbineModel({ liveRef }: { liveRef: React.RefObject<LiveInputs> }) {
     s.pitch += (targetPitchRad(live) - s.pitch) * approach(dt, 4);
     for (const blade of bladeRefs.current) if (blade) blade.rotation.y = -s.pitch;
 
+    // Tower cut-away: progress 0 → 1. The removable half is always turned towards the
+    // camera, so visitors can orbit and still see inside.
+    const openTarget = openRef.current ? 1 : 0;
+    progressRef.current += (openTarget - progressRef.current) * approach(dt, 0.35);
+    if (Math.abs(openTarget - progressRef.current) < 0.002) progressRef.current = openTarget;
+    const p = progressRef.current;
+    if (shellRef.current) {
+      shellRef.current.rotation.y = Math.atan2(state.camera.position.x, state.camera.position.z);
+    }
+    if (frontRef.current) {
+      frontRef.current.position.z = p * 3.5; // slides out towards the viewer…
+      frontRef.current.castShadow = p < 0.5;
+    }
+    if (frontMatRef.current) {
+      frontMatRef.current.opacity = 1 - 0.92 * p; // …and fades to a faint ghost
+      frontMatRef.current.depthWrite = p < 0.05;
+    }
+    if (doorRef.current) doorRef.current.visible = p < 0.05;
+
     // Aviation warning light, lit from dusk to dawn.
     if (beaconRef.current) {
       beaconRef.current.visible = live.nightFactor > 0.35 && state.clock.elapsedTime % 2 < 1.3;
@@ -292,14 +334,34 @@ function TurbineModel({ liveRef }: { liveRef: React.RefObject<LiveInputs> }) {
         <meshStandardMaterial color="#9aa0a6" roughness={0.95} />
       </mesh>
       {/* Plain light-grey tower (no green base bands on the Lawrence Weston turbine) */}
-      <mesh geometry={geo.tower} position={[0, TOWER_TOP / 2, 0]} castShadow receiveShadow>
-        <meshStandardMaterial color="#e4e7ea" roughness={0.6} metalness={0.05} />
-      </mesh>
-      {/* Tower door */}
-      <mesh position={[0, 1.75, TOWER_BASE_R - 0.02]}>
-        <boxGeometry args={[1.1, 2.3, 0.12]} />
-        <meshStandardMaterial color="#5f6468" roughness={0.6} />
-      </mesh>
+      <Part id="tower" enabled={!towerOpen} labelAt={[0, 32, 0]}>
+        <group ref={shellRef} position={[0, TOWER_TOP / 2, 0]}>
+          <mesh geometry={geo.towerBack} castShadow receiveShadow>
+            <meshStandardMaterial color="#e4e7ea" roughness={0.6} metalness={0.05} side={THREE.DoubleSide} />
+          </mesh>
+          <mesh ref={frontRef} geometry={geo.towerFront} castShadow receiveShadow>
+            <meshStandardMaterial
+              ref={frontMatRef}
+              color="#e4e7ea"
+              roughness={0.6}
+              metalness={0.05}
+              side={THREE.DoubleSide}
+              transparent
+            />
+          </mesh>
+        </group>
+        {/* Invisible, fatter hit area so the slender tower is easy to tap on a touch screen */}
+        <mesh position={[0, TOWER_TOP / 2, 0]}>
+          <cylinderGeometry args={[TOWER_TOP_R + 3, TOWER_BASE_R + 4, TOWER_TOP, 12, 1, true]} />
+          <meshBasicMaterial transparent opacity={0} depthWrite={false} colorWrite={false} side={THREE.DoubleSide} />
+        </mesh>
+        {/* Tower door */}
+        <mesh ref={doorRef} position={[0, 1.75, TOWER_BASE_R - 0.02]}>
+          <boxGeometry args={[1.1, 2.3, 0.12]} />
+          <meshStandardMaterial color="#5f6468" roughness={0.6} />
+        </mesh>
+      </Part>
+      <TowerInterior progressRef={progressRef} workLightYRef={workLightYRef} />
 
       {/* Yaw system: everything above the tower top rotates about Y */}
       <group ref={yawRef} position={[0, TOWER_TOP, 0]}>
@@ -309,17 +371,21 @@ function TurbineModel({ liveRef }: { liveRef: React.RefObject<LiveInputs> }) {
         </mesh>
 
         <group position={[0, NACELLE_AXIS_Y, 0]} rotation={[-SHAFT_TILT, 0, 0]}>
-          <mesh geometry={geo.nacelle} castShadow receiveShadow>
-            <meshStandardMaterial color="#e9ecee" roughness={0.45} metalness={0.08} flatShading side={THREE.DoubleSide} />
-          </mesh>
-          <mesh geometry={geo.generator} castShadow>
-            <meshStandardMaterial color="#e8ebee" roughness={0.4} metalness={0.15} side={THREE.DoubleSide} />
-          </mesh>
-          {/* Met mast with anemometer on the roof */}
-          <mesh position={[0, 1.55 + 0.55, ROTOR_Z - 3.3]}>
-            <cylinderGeometry args={[0.05, 0.05, 1.1, 8]} />
-            <meshStandardMaterial color="#4b5055" roughness={0.6} />
-          </mesh>
+          <Part id="nacelle" labelAt={[0, 3.4, ROTOR_Z - 4.8]}>
+            <mesh geometry={geo.nacelle} castShadow receiveShadow>
+              <meshStandardMaterial color="#e9ecee" roughness={0.45} metalness={0.08} flatShading side={THREE.DoubleSide} />
+            </mesh>
+            {/* Met mast with anemometer on the roof */}
+            <mesh position={[0, 1.55 + 0.55, ROTOR_Z - 3.3]}>
+              <cylinderGeometry args={[0.05, 0.05, 1.1, 8]} />
+              <meshStandardMaterial color="#4b5055" roughness={0.6} />
+            </mesh>
+          </Part>
+          <Part id="generator" labelAt={[0, 4.4, ROTOR_Z - 1.8]}>
+            <mesh geometry={geo.generator} castShadow>
+              <meshStandardMaterial color="#e8ebee" roughness={0.4} metalness={0.15} side={THREE.DoubleSide} />
+            </mesh>
+          </Part>
           <mesh ref={beaconRef} position={[0, 1.55 + 0.5, ROTOR_Z - 5.4]} visible={false}>
             <sphereGeometry args={[0.45, 16, 12]} />
             <meshBasicMaterial color="#ff2a1a" toneMapped={false} />
@@ -327,9 +393,13 @@ function TurbineModel({ liveRef }: { liveRef: React.RefObject<LiveInputs> }) {
 
           {/* Rotor: hub + three blades spinning about the shaft (local Z) */}
           <group ref={rotorRef} position={[0, 0, ROTOR_Z]}>
-            <mesh geometry={geo.spinner} castShadow>
-              <meshStandardMaterial color="#f4f5f6" roughness={0.35} metalness={0.1} side={THREE.DoubleSide} />
-            </mesh>
+            {/* Labels sit on the shaft axis so they stay put while the rotor turns. */}
+            <Part id="hub" labelAt={[0, 0, 4.2]}>
+              <mesh geometry={geo.spinner} castShadow>
+                <meshStandardMaterial color="#f4f5f6" roughness={0.35} metalness={0.1} side={THREE.DoubleSide} />
+              </mesh>
+            </Part>
+            <Part id="blades" labelAt={[0, 0, 4.2]}>
             {[0, 1, 2].map((i) => (
               <group key={i} rotation={[0, 0, (i * TWO_PI) / 3]}>
                 <mesh
@@ -343,6 +413,7 @@ function TurbineModel({ liveRef }: { liveRef: React.RefObject<LiveInputs> }) {
                 </mesh>
               </group>
             ))}
+            </Part>
           </group>
         </group>
       </group>
@@ -492,11 +563,113 @@ function Atmosphere({ elevationDeg, azimuthDeg }: { elevationDeg: number; azimut
 /* Camera: auto-orbit when idle, pauses while someone interacts        */
 /* ------------------------------------------------------------------ */
 
-const CameraRig = memo(function CameraRig() {
+const easeInOut = (k: number) => (k < 0.5 ? 4 * k * k * k : 1 - (-2 * k + 2) ** 3 / 2);
+
+/**
+ * Orbit controls plus a short fly-to animation whenever `focus` changes. With no focus the
+ * camera returns to the overview and the slow auto-orbit resumes.
+ */
+/** Left drag orbits, middle (or right) drag pans, wheel zooms. */
+const MOUSE_BUTTONS = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.PAN };
+/** How far the pan target may wander from the tower axis while exploring (m). */
+const PAN_RADIUS = 7;
+
+const CameraRig = memo(function CameraRig({
+  focus,
+  panelOpen,
+  workLightYRef,
+}: {
+  focus: Focus | null;
+  panelOpen: boolean;
+  workLightYRef: React.RefObject<number>;
+}) {
   const controlsRef = useRef<ComponentRef<typeof OrbitControls>>(null);
   const resumeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const camera = useThree((s) => s.camera);
+  const size = useThree((s) => s.size);
+  // While the info panel covers the right of the view, shift the picture left (view offset)
+  // so the subject stays centred in the visible part.
+  const shiftRef = useRef(0);
+  const panelOpenRef = useRef(panelOpen);
+  panelOpenRef.current = panelOpen;
+  const focusedRef = useRef(false);
+  focusedRef.current = focus !== null;
+  const firstRun = useRef(true);
+  const flight = useRef<{
+    t: number;
+    fromTarget: THREE.Vector3;
+    toTarget: THREE.Vector3;
+    fromPos: THREE.Vector3;
+    toPos: THREE.Vector3;
+  } | null>(null);
 
   useEffect(() => () => clearTimeout(resumeTimer.current), []);
+
+  useEffect(() => {
+    const controls = controlsRef.current;
+    if (!controls) return;
+    if (firstRun.current) {
+      firstRun.current = false;
+      if (!focus) return;
+    }
+    const goal = focus ?? HOME_FOCUS;
+    const fromTarget = controls.target.clone();
+    const toTarget = new THREE.Vector3(...goal.target);
+    // Keep the visitor's current viewing direction; only distance and height change.
+    const dir = camera.position.clone().sub(fromTarget).setY(0);
+    if (dir.lengthSq() < 1e-6) dir.set(0, 0, 1);
+    dir.normalize();
+    const elev = goal.elevationDeg * DEG;
+    const toPos = toTarget
+      .clone()
+      .addScaledVector(dir, goal.distance * Math.cos(elev))
+      .add(new THREE.Vector3(0, goal.distance * Math.sin(elev), 0));
+    flight.current = { t: 0, fromTarget, toTarget, fromPos: camera.position.clone(), toPos };
+    clearTimeout(resumeTimer.current);
+    controls.autoRotate = false;
+    controls.minDistance = 3; // allow close-ups (and don't clamp mid-flight)
+  }, [focus, camera]);
+
+  useFrame((_, delta) => {
+    const cam = camera as THREE.PerspectiveCamera;
+    const targetShift = panelOpenRef.current ? PANEL_SHIFT : 0;
+    if (Math.abs(targetShift - shiftRef.current) > 1e-4) {
+      shiftRef.current += (targetShift - shiftRef.current) * approach(Math.min(delta, 0.1), 0.3);
+      if (Math.abs(targetShift - shiftRef.current) < 1e-3) shiftRef.current = targetShift;
+      if (shiftRef.current === 0) cam.clearViewOffset();
+      else cam.setViewOffset(size.width, size.height, shiftRef.current * size.width, 0, size.width, size.height);
+    } else if (shiftRef.current !== 0 && cam.view && cam.view.fullWidth !== size.width) {
+      cam.setViewOffset(size.width, size.height, shiftRef.current * size.width, 0, size.width, size.height);
+    }
+
+    const controls = controlsRef.current;
+    if (controls && focusedRef.current) {
+      // Keep panning inside (and just around) the tower, from the foundation to the nacelle.
+      const tg = controls.target;
+      const r = Math.hypot(tg.x, tg.z);
+      if (r > PAN_RADIUS) {
+        tg.x *= PAN_RADIUS / r;
+        tg.z *= PAN_RADIUS / r;
+      }
+      tg.y = THREE.MathUtils.clamp(tg.y, 0.5, TOWER_TOP + 6);
+      workLightYRef.current = tg.y + 1.5; // the interior work light follows what you look at
+    }
+
+    const f = flight.current;
+    if (!f || !controls) return;
+    f.t = Math.min(1, f.t + Math.min(delta, 0.1) / 1.6);
+    const k = easeInOut(f.t);
+    controls.target.lerpVectors(f.fromTarget, f.toTarget, k);
+    camera.position.lerpVectors(f.fromPos, f.toPos, k);
+    controls.update();
+    if (f.t >= 1) {
+      flight.current = null;
+      if (!focusedRef.current) {
+        controls.minDistance = 70;
+        controls.autoRotate = true;
+      }
+    }
+  });
 
   return (
     <OrbitControls
@@ -504,7 +677,9 @@ const CameraRig = memo(function CameraRig() {
       target={CAMERA_TARGET}
       autoRotate
       autoRotateSpeed={0.35}
-      enablePan={false}
+      enablePan={focus !== null}
+      mouseButtons={MOUSE_BUTTONS}
+      screenSpacePanning
       enableDamping
       dampingFactor={0.08}
       minDistance={70}
@@ -512,13 +687,14 @@ const CameraRig = memo(function CameraRig() {
       minPolarAngle={0.25}
       maxPolarAngle={Math.PI / 2 - 0.04}
       onStart={() => {
+        flight.current = null; // the visitor takes over
         clearTimeout(resumeTimer.current);
         if (controlsRef.current) controlsRef.current.autoRotate = false;
       }}
       onEnd={() => {
         clearTimeout(resumeTimer.current);
         resumeTimer.current = setTimeout(() => {
-          if (controlsRef.current) controlsRef.current.autoRotate = true;
+          if (controlsRef.current && !focusedRef.current) controlsRef.current.autoRotate = true;
         }, AUTO_ORBIT_RESUME_MS);
       }}
     />
@@ -529,7 +705,7 @@ const CameraRig = memo(function CameraRig() {
 /* Public component                                                    */
 /* ------------------------------------------------------------------ */
 
-export default function Turbine3D({ className, ...props }: Turbine3DProps) {
+export default function Turbine3D({ className, onExploringChange, ...props }: Turbine3DProps) {
   const [now, setNow] = useState(() => new Date());
   const [canvasKey, setCanvasKey] = useState(0);
 
@@ -547,6 +723,79 @@ export default function Turbine3D({ className, ...props }: Turbine3DProps) {
     liveRef.current = { ...props, nightFactor };
   });
 
+  /* ---------------- Exploration state (hover / select / open tower) ---------------- */
+  const [hoveredId, setHoveredId] = useState<PartId | null>(null);
+  const [selectedId, setSelectedId] = useState<PartId | null>(null);
+  const [towerOpen, setTowerOpen] = useState(false);
+  const [focus, setFocus] = useState<Focus | null>(null);
+  const workLightYRef = useRef(8);
+  const lastInputRef = useRef(Date.now());
+
+
+  const setHovered = useCallback((id: PartId | null, from?: PartId) => {
+    // `from`: only clear the hover if it still belongs to the part that is leaving.
+    setHoveredId((current) => (id === null && from !== undefined && current !== from ? current : id));
+  }, []);
+
+  const select = useCallback((id: PartId) => {
+    lastInputRef.current = Date.now();
+    setSelectedId(id);
+    if (id === "tower") {
+      setTowerOpen(true);
+      setFocus({ ...TOWER_OPEN_FOCUS }); // new object: re-fly even if the framing is unchanged
+    } else if (isTowerPart(id)) {
+      setFocus({ ...(PART_INFO[id].focus ?? TOWER_OPEN_FOCUS) });
+    }
+  }, []);
+
+  const close = useCallback(() => {
+    setTowerOpen(false);
+    setSelectedId(null);
+    setHoveredId(null);
+    setFocus(null);
+  }, []);
+
+  const goTo = useCallback((f: Focus) => {
+    lastInputRef.current = Date.now();
+    setSelectedId("tower");
+    setFocus({ ...f });
+  }, []);
+
+  const interaction = useMemo<InteractionState>(
+    () => ({ hoveredId, selectedId, towerOpen, setHovered, select }),
+    [hoveredId, selectedId, towerOpen, setHovered, select],
+  );
+
+  const exploring = towerOpen || selectedId !== null;
+  useEffect(() => {
+    onExploringChange?.(exploring);
+  }, [exploring, onExploringChange]);
+
+  // Pointer cursor while over a part.
+  useEffect(() => {
+    document.body.style.cursor = hoveredId ? "pointer" : "";
+    return () => {
+      document.body.style.cursor = "";
+    };
+  }, [hoveredId]);
+
+  // Esc closes; the kiosk closes itself after a while without input.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [close]);
+
+  useEffect(() => {
+    if (!towerOpen && !selectedId) return;
+    const id = setInterval(() => {
+      if (Date.now() - lastInputRef.current > IDLE_CLOSE_MS) close();
+    }, 5_000);
+    return () => clearInterval(id);
+  }, [towerOpen, selectedId, close]);
+
   // Recover from a lost GPU context (driver reset, sleep/wake) by remounting the canvas.
   const onCreated = useCallback(({ gl }: RootState) => {
     const canvas = gl.domElement;
@@ -558,20 +807,38 @@ export default function Turbine3D({ className, ...props }: Turbine3DProps) {
   }, []);
 
   return (
-    <div className={className}>
-      <Canvas
-        key={canvasKey}
-        shadows
-        dpr={[1, 1.75]}
-        camera={{ position: [175, 60, 200], fov: 38, near: 1, far: 5000 }}
-        gl={{ antialias: true, powerPreference: "high-performance" }}
-        onCreated={onCreated}
-      >
-        <Atmosphere elevationDeg={sun.elevationDeg} azimuthDeg={sun.azimuthDeg} />
-        <TurbineModel liveRef={liveRef} />
-        <WindParticles liveRef={liveRef} />
-        <CameraRig />
-      </Canvas>
+    <div
+      className={className}
+      onPointerDown={() => (lastInputRef.current = Date.now())}
+      onWheel={() => (lastInputRef.current = Date.now())}
+    >
+      <InteractionProvider value={interaction}>
+        <Canvas
+          key={canvasKey}
+          shadows
+          dpr={[1, 1.75]}
+          camera={{ position: [175, 60, 200], fov: 38, near: 0.5, far: 5000 }}
+          gl={{ antialias: true, powerPreference: "high-performance" }}
+          onCreated={onCreated}
+          onPointerMissed={() => {
+            // Tap on empty sky/ground: drop the selection, but keep the tower open.
+            if (!towerOpen) setSelectedId(null);
+            else if (selectedId !== "tower") setSelectedId("tower");
+          }}
+        >
+          <Atmosphere elevationDeg={sun.elevationDeg} azimuthDeg={sun.azimuthDeg} />
+          <TurbineModel liveRef={liveRef} workLightYRef={workLightYRef} />
+          <WindParticles liveRef={liveRef} />
+          <CameraRig focus={focus} panelOpen={exploring} workLightYRef={workLightYRef} />
+        </Canvas>
+      </InteractionProvider>
+      <InfoPanel
+        selectedId={selectedId}
+        towerOpen={towerOpen}
+        onSelect={select}
+        onGoTo={goTo}
+        onClose={close}
+      />
     </div>
   );
 }

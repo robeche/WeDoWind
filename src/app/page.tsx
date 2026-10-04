@@ -16,7 +16,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import dynamic from "next/dynamic";
-import { useMemo, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import AnimatedNumber from "@/components/AnimatedNumber";
 import EquivalentsCycler from "@/components/EquivalentsCycler";
 import MessageTicker from "@/components/MessageTicker";
@@ -78,6 +78,8 @@ export default function KioskPage() {
   const cursorIdle = useIdleCursor(5000);
   const { isFullscreen, toggle: toggleFullscreen } = useFullscreen();
   useKioskMaintenance();
+  // While a visitor explores the 3D model, the telemetry chips step aside.
+  const [exploring, setExploring] = useState(false);
 
   const metrics = useMemo(() => computeCommunityMetrics(live, history), [live, history]);
   const ready = live !== null;
@@ -149,6 +151,7 @@ export default function KioskPage() {
               windSpeedMs={windSpeed}
               status={status}
               hasData={ready}
+              onExploringChange={setExploring}
             />
           </SafeBoundary>
 
@@ -169,7 +172,11 @@ export default function KioskPage() {
             </div>
           )}
 
-          <div className="pointer-events-none absolute inset-x-[2vh] bottom-[2vh] grid grid-cols-3 gap-[1.4vh]">
+          <div
+            className={`pointer-events-none absolute inset-x-[2vh] bottom-[2vh] grid grid-cols-3 gap-[1.4vh] transition-all duration-500 ${
+              exploring ? "translate-y-4 opacity-0" : "opacity-100"
+            }`}
+          >
             <TelemetryChip
               icon={Wind}
               label="Wind speed"
