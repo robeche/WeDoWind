@@ -10,7 +10,7 @@
 import { useFrame } from "@react-three/fiber";
 import { memo, useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
-import { NACELLE_AXIS_Y } from "./dimensions";
+import { NACELLE_AXIS_Y, NACELLE_STRETCH } from "./dimensions";
 import { cylinderBetween, tubeThrough } from "./geometry";
 import { Part } from "./interaction";
 
@@ -21,6 +21,8 @@ export const YAW_AXIS_CABLE_ENTRY = V(0, 0.6 - NACELLE_AXIS_Y, 0);
 
 const CABINET = { w: 0.4, h: 1.5, d: 0.9, x: 1.45, floorY: -2.0, zs: [-0.1, 0.95] };
 const PUMP = { x: -1.45, z: 0.3 };
+/** Heat exchanger across the back wall of the (stretched) machine house. */
+const COOLER_Z = -1.72 - NACELLE_STRETCH;
 
 function useVisible(progressRef: React.RefObject<number>) {
   const ref = useRef<THREE.Group>(null);
@@ -115,8 +117,8 @@ function NacelleInteriorImpl({ progressRef }: { progressRef: React.RefObject<num
       ),
     );
     // Coolant circuit: generator stator ↔ pump skid ↔ rear heat exchanger (red = hot, blue = cooled).
-    const hot = tubeThrough([V(-2.45, 1.0, 1.85), V(-1.9, 0.4, 1.3), V(PUMP.x, -1.1, PUMP.z + 0.3), V(-1.2, -1.2, -1.2), V(-0.95, -0.9, -1.7)], 0.05, 60);
-    const cold = tubeThrough([V(0.95, -0.9, -1.7), V(1.25, -1.5, -1.2), V(0.6, -2.05, -0.6), V(PUMP.x + 0.15, -1.55, PUMP.z - 0.25), V(-1.75, -0.2, 1.25), V(-2.3, 0.75, 1.85)], 0.05, 60);
+    const hot = tubeThrough([V(-2.45, 1.0, 1.85), V(-1.9, 0.4, 1.3), V(PUMP.x, -1.1, PUMP.z + 0.3), V(-1.2, -1.2, -1.2), V(-1.1, -1.1, COOLER_Z + 0.6), V(-0.95, -0.9, COOLER_Z + 0.02)], 0.05, 60);
+    const cold = tubeThrough([V(0.95, -0.9, COOLER_Z + 0.02), V(1.1, -1.3, COOLER_Z + 0.6), V(1.25, -1.5, -1.2), V(0.6, -2.05, -0.6), V(PUMP.x + 0.15, -1.55, PUMP.z - 0.25), V(-1.75, -0.2, 1.25), V(-2.3, 0.75, 1.85)], 0.05, 60);
     const toCabinet = tubeThrough([V(PUMP.x + 0.2, -1.4, PUMP.z), V(0.2, -1.95, 0.6), V(CABINET.x - 0.25, -1.3, CABINET.zs[1])], 0.025, 40);
     return { carrier, power, data, hot, cold, toCabinet };
   }, []);
@@ -145,8 +147,8 @@ function NacelleInteriorImpl({ progressRef }: { progressRef: React.RefObject<num
         </mesh>
         {/* Service floor (grating) either side */}
         {[-1, 1].map((s) => (
-          <mesh key={s} position={[s * 1.55, CABINET.floorY - 0.02, 0.45]} rotation={[-Math.PI / 2, 0, 0]}>
-            <planeGeometry args={[0.7, 2.6]} />
+          <mesh key={s} position={[s * 1.55, CABINET.floorY - 0.02, 0.45 - NACELLE_STRETCH / 2]} rotation={[-Math.PI / 2, 0, 0]}>
+            <planeGeometry args={[0.7, 2.6 + NACELLE_STRETCH]} />
             <meshStandardMaterial color="#8f969b" metalness={0.5} roughness={0.6} side={THREE.DoubleSide} />
           </mesh>
         ))}
@@ -176,14 +178,14 @@ function NacelleInteriorImpl({ progressRef }: { progressRef: React.RefObject<num
         ))}
       </Part>
 
-      <Part id="cooling" labelAt={[0, 1.1, -1.8]}>
+      <Part id="cooling" labelAt={[0, 1.1, COOLER_Z - 0.1]}>
         {/* Heat exchanger (finned) across the back of the nacelle */}
-        <mesh position={[0, -0.25, -1.72]}>
+        <mesh position={[0, -0.25, COOLER_Z]}>
           <boxGeometry args={[2.1, 1.9, 0.16]} />
           <meshStandardMaterial map={fins} metalness={0.6} roughness={0.4} />
         </mesh>
-        <Fan position={[-0.52, -0.25, -1.88]} />
-        <Fan position={[0.52, -0.25, -1.88]} />
+        <Fan position={[-0.52, -0.25, COOLER_Z - 0.16]} />
+        <Fan position={[0.52, -0.25, COOLER_Z - 0.16]} />
         {/* Pump skid */}
         <group position={[PUMP.x, -1.85, PUMP.z]}>
           <mesh position={[0, 0.25, 0]}>

@@ -10,6 +10,7 @@ import { sunPosition } from "@/utils/sun";
 import {
   DEG,
   NACELLE_AXIS_Y,
+  NACELLE_STRETCH,
   ROTOR_Z,
   SHAFT_TILT,
   TOWER_BASE_R,
@@ -22,6 +23,7 @@ import { BladeInternalsMemo, PitchDriveMemo } from "./turbine/BladeStructure";
 import { GeneratorRotor, GeneratorStatic } from "./turbine/GeneratorInternals";
 import { latheAlongZ } from "./turbine/geometry";
 import InfoPanel from "./turbine/InfoPanel";
+import { bladeLivery, nacelleLivery } from "./turbine/livery";
 import { CalloutLayer, type AnchorId, type CalloutRegistry, type CalloutSpec } from "./turbine/Callouts";
 import { HoverLabel, InteractionProvider, Part, useInteraction, type InteractionState } from "./turbine/interaction";
 import { NacelleInterior, YawSystem } from "./turbine/NacelleInterior";
@@ -83,9 +85,9 @@ function createNacelleGeometry(): THREE.BufferGeometry {
   // [z, halfWidth, top, bottom, topChamfer, bottomChamfer]
   const sections: Array<[number, number, number, number, number, number]> = [
     [ROTOR_Z - 2.7, 2.05, 1.55, -2.65, 0.35, 0.95],
-    [ROTOR_Z - 5.6, 2.05, 1.55, -2.65, 0.35, 0.95],
-    [ROTOR_Z - 6.7, 1.8, 1.3, -1.55, 0.3, 0.7],
-    [ROTOR_Z - 7.05, 1.55, 1.0, -0.95, 0.25, 0.5],
+    [ROTOR_Z - 5.6 - NACELLE_STRETCH, 2.05, 1.55, -2.65, 0.35, 0.95],
+    [ROTOR_Z - 6.7 - NACELLE_STRETCH, 1.8, 1.3, -1.55, 0.3, 0.7],
+    [ROTOR_Z - 7.05 - NACELLE_STRETCH, 1.55, 1.0, -0.95, 0.25, 0.5],
   ];
   const ring = ([z, w, top, bot, ct, cb]: (typeof sections)[number]) => [
     [-w + ct, top, z], [w - ct, top, z], [w, top - ct, z], [w, bot + cb, z],
@@ -329,10 +331,12 @@ function TurbineModel({
         <YawSystem progressRef={nacelleP} />
 
         <group position={[0, NACELLE_AXIS_Y, 0]} rotation={[-SHAFT_TILT, 0, 0]}>
-          <Part id="nacelle" labelAt={[0, 3.4, ROTOR_Z - 4.8]}>
+          <Part id="nacelle" labelAt={[0, 3.4, ROTOR_Z - 4.8 - NACELLE_STRETCH / 2]}>
             <mesh geometry={geo.nacelle} castShadow receiveShadow>
               <meshStandardMaterial
                 ref={nacelleMatRef}
+                onBeforeCompile={nacelleLivery.onBeforeCompile}
+                customProgramCacheKey={nacelleLivery.customProgramCacheKey}
                 color="#e9ecee"
                 roughness={0.45}
                 metalness={0.08}
@@ -342,7 +346,7 @@ function TurbineModel({
               />
             </mesh>
             {/* Met mast with anemometer on the roof */}
-            <mesh position={[0, 1.55 + 0.55, ROTOR_Z - 3.3]}>
+            <mesh position={[0, 1.55 + 0.55, ROTOR_Z - 3.3 - NACELLE_STRETCH]}>
               <cylinderGeometry args={[0.05, 0.05, 1.1, 8]} />
               <meshStandardMaterial color="#4b5055" roughness={0.6} />
             </mesh>
@@ -363,7 +367,7 @@ function TurbineModel({
           </Part>
           <GeneratorStatic progressRef={generatorP} />
 
-          <mesh ref={beaconRef} position={[0, 1.55 + 0.5, ROTOR_Z - 5.4]} visible={false}>
+          <mesh ref={beaconRef} position={[0, 1.55 + 0.5, ROTOR_Z - 5.4 - NACELLE_STRETCH]} visible={false}>
             <sphereGeometry args={[0.45, 16, 12]} />
             <meshBasicMaterial color="#ff2a1a" toneMapped={false} />
           </mesh>
@@ -396,6 +400,8 @@ function TurbineModel({
                     <mesh geometry={geo.blade} castShadow>
                       <meshStandardMaterial
                         ref={i === 0 ? inspectedBladeMatRef : undefined}
+                        onBeforeCompile={bladeLivery.onBeforeCompile}
+                        customProgramCacheKey={bladeLivery.customProgramCacheKey}
                         color="#f2f3f4"
                         roughness={0.42}
                         metalness={0.02}

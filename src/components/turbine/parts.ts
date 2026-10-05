@@ -78,7 +78,7 @@ export const EXTERIOR_PARTS: Record<ExteriorPartId, PartInfo> = {
     opens: true,
     intro:
       "The nacelle carries the generator and rotor, turns them into the wind and houses the control, cooling and safety systems. It follows the live nacelle position of the real turbine.",
-    focus: { target: [0, -0.4, -0.2], distance: 15, elevationDeg: 18, frame: "nacelle", viewDir: [1, 0, -0.25] },
+    focus: { target: [0, -0.4, -1.2], distance: 17, elevationDeg: 18, frame: "nacelle", viewDir: [1, 0, -0.25] },
   },
   generator: {
     id: "generator",
@@ -213,7 +213,7 @@ export const NACELLE_PARTS: Record<NacellePartId, PartInfo> = {
     name: "Cooling system",
     description:
       "Pumps circulate coolant from the generator and electronics to a heat exchanger at the back of the nacelle, where fans blow the heat out into the air.",
-    focus: nacelleFocus([0, -0.2, -1.8], 8, [0.6, 0, -1]),
+    focus: nacelleFocus([0, -0.2, -3.8], 8, [0.6, 0, -1]),
   },
   nacelleCables: {
     id: "nacelleCables",

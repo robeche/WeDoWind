@@ -13,6 +13,8 @@ export const BLADE_ROOT_R = ROTOR_RADIUS - BLADE_LENGTH; // 1.85 m
 export const HUB_HEIGHT = TIP_HEIGHT - ROTOR_RADIUS; // 92.15 m
 export const NACELLE_AXIS_Y = 3.05;
 export const TOWER_TOP = HUB_HEIGHT - NACELLE_AXIS_Y; // 89.1 m
+/** Extra length of the EP3 rear machine house behind the generator (≈ 6.4 m box overall). */
+export const NACELLE_STRETCH = 2.0;
 export const TOWER_BASE_R = 2.9;
 export const TOWER_TOP_R = 1.65;
 export const TOWER_WALL = 0.05;
