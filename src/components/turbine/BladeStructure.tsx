@@ -176,47 +176,4 @@ function BladeInternals({ progressRef }: { progressRef: React.RefObject<number> 
   );
 }
 
-/**
- * Pitch bearing and electric pitch drive: fixed in the hub (they do not pitch with the blade).
- * Rendered in the blade's slot of the rotor, outside the pitching group.
- */
-function PitchDrive({ progressRef }: { progressRef: React.RefObject<number> }) {
-  const groupRef = useRef<THREE.Group>(null);
-  useFrame(() => {
-    if (groupRef.current) groupRef.current.visible = progressRef.current > 0.02;
-  });
-  return (
-    <group ref={groupRef} visible={false}>
-      <Part id="pitchSystem" labelAt={[-1.4, BLADE_ROOT_R - 0.2, 1.4]}>
-        {/* Pitch bearing with its gear ring */}
-        <mesh position={[0, BLADE_ROOT_R - 0.12, 0]}>
-          <cylinderGeometry args={[1.5, 1.5, 0.22, 64, 1, true]} />
-          <meshStandardMaterial color="#4b5563" metalness={0.7} roughness={0.35} side={THREE.DoubleSide} />
-        </mesh>
-        <mesh position={[0, BLADE_ROOT_R - 0.12, 0]} rotation={[Math.PI / 2, 0, 0]}>
-          <torusGeometry args={[1.42, 0.06, 8, 64]} />
-          <meshStandardMaterial color="#6b7280" metalness={0.8} roughness={0.3} />
-        </mesh>
-        {/* Electric pitch motor + gearbox, pinion on the gear ring */}
-        <group position={[-1.05, BLADE_ROOT_R - 0.75, 0.9]}>
-          <mesh position={[0, 0.25, 0]}>
-            <cylinderGeometry args={[0.13, 0.13, 0.5, 16]} />
-            <meshStandardMaterial color="#6b7280" metalness={0.6} roughness={0.4} />
-          </mesh>
-          <mesh position={[0, -0.18, 0]}>
-            <cylinderGeometry args={[0.16, 0.16, 0.36, 16]} />
-            <meshStandardMaterial color="#1f2937" metalness={0.5} roughness={0.4} />
-          </mesh>
-        </group>
-        {/* Emergency power unit (batteries/capacitors) */}
-        <mesh position={[1.0, BLADE_ROOT_R - 0.75, 0.95]}>
-          <boxGeometry args={[0.4, 0.5, 0.25]} />
-          <meshStandardMaterial color="#cfd3d6" roughness={0.55} />
-        </mesh>
-      </Part>
-    </group>
-  );
-}
-
 export const BladeInternalsMemo = memo(BladeInternals);
-export const PitchDriveMemo = memo(PitchDrive);

@@ -32,6 +32,7 @@ const OPEN_TITLE: Record<OpenableId, string> = {
   tower: "89 m of steel",
   nacelle: "The machine room",
   generator: "Direct-drive ring generator",
+  hub: "The pitch system",
   blades: "Inside a 56 m blade",
 };
 

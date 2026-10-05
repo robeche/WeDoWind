@@ -1,11 +1,10 @@
 "use client";
 
-import { OrbitControls, Sky, Stars } from "@react-three/drei";
+import { OrbitControls, Sky } from "@react-three/drei";
 import { Canvas, useFrame, useThree, type RootState } from "@react-three/fiber";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ComponentRef } from "react";
 import * as THREE from "three";
 import type { TurbineStatus } from "@/services/aceApi";
-import { sunPosition } from "@/utils/sun";
 
 import {
   DEG,
@@ -19,7 +18,8 @@ import {
   TWO_PI,
 } from "./turbine/dimensions";
 import { createBladeGeometry } from "./turbine/blade";
-import { BladeInternalsMemo, PitchDriveMemo } from "./turbine/BladeStructure";
+import { BladeInternalsMemo } from "./turbine/BladeStructure";
+import { HubInternalsMemo } from "./turbine/HubInternals";
 import { GeneratorRotor, GeneratorStatic } from "./turbine/GeneratorInternals";
 import { latheAlongZ } from "./turbine/geometry";
 import InfoPanel from "./turbine/InfoPanel";
@@ -68,9 +68,7 @@ export interface Turbine3DProps {
   callouts?: CalloutSpec[];
 }
 
-interface LiveInputs extends Omit<Turbine3DProps, "className" | "onExploringChange" | "compact" | "callouts"> {
-  nightFactor: number;
-}
+type LiveInputs = Omit<Turbine3DProps, "className" | "onExploringChange" | "compact" | "callouts">;
 
 /* ------------------------------------------------------------------ */
 /* Procedural geometry                                                 */
@@ -187,7 +185,6 @@ function TurbineModel({
   const rotorRef = useRef<THREE.Group>(null);
   const bladeRefs = useRef<Array<THREE.Group | null>>([]);
   const bladeInternalsRef = useRef<THREE.Group | null>(null);
-  const beaconRef = useRef<THREE.Mesh>(null);
   const sim = useRef({ rpm: 0, theta: 0, yaw: Math.PI - 225 * DEG, yawInitialised: false, pitch: 88 * DEG });
 
   // Opening state: each openable part animates 0 → 1 while it is open.
@@ -197,9 +194,12 @@ function TurbineModel({
   const towerP = useRef(0);
   const nacelleP = useRef(0);
   const generatorP = useRef(0);
+  const hubP = useRef(0);
   const bladesP = useRef(0);
+  /** Current blade pitch (rad), read by the hub's pitch drives. */
+  const pitchRef = useRef(88 * DEG);
   const progress = useMemo<ProgressRefs>(
-    () => ({ tower: towerP, nacelle: nacelleP, generator: generatorP, blades: bladesP }),
+    () => ({ tower: towerP, nacelle: nacelleP, generator: generatorP, hub: hubP, blades: bladesP }),
     [],
   );
 
@@ -219,14 +219,17 @@ function TurbineModel({
     // Capped so a backgrounded tab doesn't produce one huge jump when it resumes.
     const dt = Math.min(delta, 0.25);
     const bladesOpen = openRef.current === "blades";
+    const hubOpen = openRef.current === "hub";
+    // The rotor is stopped (and parked) while someone looks at a blade or inside the hub.
+    const parked = bladesOpen || hubOpen;
 
     // Rotor: smooth to the live RPM (rotor inertia), then Δθ = (RPM · 2π / 60) · Δt.
-    // While a blade is being inspected the rotor brakes to a stop and parks that blade level.
-    const targetRpm = bladesOpen ? 0 : live.hasData ? Math.max(0, live.rotorSpeedRpm) : 0;
-    s.rpm += (targetRpm - s.rpm) * approach(dt, bladesOpen ? 1.2 : targetRpm > s.rpm ? 3 : 6);
+    // While a blade or the hub is being inspected the rotor brakes to a stop and parks blade 0 level.
+    const targetRpm = parked ? 0 : live.hasData ? Math.max(0, live.rotorSpeedRpm) : 0;
+    s.rpm += (targetRpm - s.rpm) * approach(dt, parked ? 1.2 : targetRpm > s.rpm ? 3 : 6);
     if (targetRpm === 0 && s.rpm < 0.01) s.rpm = 0;
     s.theta = (s.theta + ((s.rpm * 2 * Math.PI) / 60) * dt) % TWO_PI;
-    if (bladesOpen && s.rpm < 0.8) s.theta += wrapPi(BLADE_PARK - s.theta) * approach(dt, 0.8);
+    if (parked && s.rpm < 0.8) s.theta += wrapPi(BLADE_PARK - s.theta) * approach(dt, 0.8);
     // Clockwise when viewed from upwind (+Z), as ENERCON rotors turn.
     if (rotorRef.current) rotorRef.current.rotation.z = -s.theta;
 
@@ -240,8 +243,12 @@ function TurbineModel({
     if (yawRef.current) yawRef.current.rotation.y = s.yaw;
     yawOutRef.current = s.yaw;
 
-    // Blade pitch: feathered when stopped, fine pitch when generating; 0° while inspected.
-    s.pitch += ((bladesOpen ? 0 : targetPitchRad(live)) - s.pitch) * approach(dt, bladesOpen ? 1.5 : 4);
+    // Blade pitch: feathered when stopped, fine pitch when generating; 0° while a blade is
+    // inspected. With the hub open (rotor stopped) the drives demonstrate a slow 0–45° sweep.
+    const demoPitch = 22.5 * DEG * (1 - Math.cos(state.clock.elapsedTime * 0.5));
+    const pitchTarget = bladesOpen ? 0 : hubOpen ? (s.rpm < 0.3 ? demoPitch : 0) : targetPitchRad(live);
+    s.pitch += (pitchTarget - s.pitch) * approach(dt, parked ? 2 : 4);
+    pitchRef.current = s.pitch;
     for (const blade of bladeRefs.current) if (blade) blade.rotation.y = -s.pitch;
     if (bladeInternalsRef.current) bladeInternalsRef.current.rotation.y = -s.pitch;
 
@@ -276,13 +283,9 @@ function TurbineModel({
     };
     ghost(nacelleMatRef.current, nacelleP.current, 0.12);
     ghost(generatorMatRef.current, generatorP.current, 0.1);
-    ghost(spinnerMatRef.current, generatorP.current, 0.2);
+    ghost(spinnerMatRef.current, Math.max(generatorP.current, hubP.current), 0.15);
     ghost(inspectedBladeMatRef.current, bladesP.current, 0.16);
 
-    // Aviation warning light, lit from dusk to dawn.
-    if (beaconRef.current) {
-      beaconRef.current.visible = live.nightFactor > 0.35 && state.clock.elapsedTime % 2 < 1.3;
-    }
   });
 
   return (
@@ -367,11 +370,6 @@ function TurbineModel({
           </Part>
           <GeneratorStatic progressRef={generatorP} />
 
-          <mesh ref={beaconRef} position={[0, 1.55 + 0.5, ROTOR_Z - 5.4 - NACELLE_STRETCH]} visible={false}>
-            <sphereGeometry args={[0.45, 16, 12]} />
-            <meshBasicMaterial color="#ff2a1a" toneMapped={false} />
-          </mesh>
-
           {/* Rotor: hub + generator rotor + three blades spinning about the shaft (local Z) */}
           <group ref={rotorRef} position={[0, 0, ROTOR_Z]}>
             {/* Labels sit on the shaft axis so they stay put while the rotor turns. */}
@@ -388,7 +386,9 @@ function TurbineModel({
               </mesh>
             </Part>
             <GeneratorRotor progressRef={generatorP} />
-            <Part id="blades" labelAt={[0, 0, 4.2]}>
+            <HubInternalsMemo progressRef={hubP} pitchRef={pitchRef} />
+            {/* Blades stay clickable except while you look inside the hub (their roots would block it). */}
+            <Part id="blades" labelAt={[0, 0, 4.2]} enabled={openPart !== "hub"}>
               {[0, 1, 2].map((i) => (
                 <group key={i} rotation={[0, 0, (i * TWO_PI) / 3]}>
                   {/* Pitching group: the blade (and, for blade 0, its internal structure) */}
@@ -421,7 +421,6 @@ function TurbineModel({
             >
               <BladeInternalsMemo progressRef={bladesP} />
             </group>
-            <PitchDriveMemo progressRef={bladesP} />
           </group>
         </group>
       </group>
@@ -510,8 +509,11 @@ function WindParticles({ liveRef }: { liveRef: React.RefObject<LiveInputs> }) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Atmosphere: real Bristol sun position → sky, lights, fog            */
+/* Atmosphere: fixed daylight (a clear afternoon) → sky, lights, fog    */
 /* ------------------------------------------------------------------ */
+
+/** Always daylight, so every component is clearly visible: sun high in the south-west. */
+const DAYLIGHT_SUN = { elevationDeg: 38, azimuthDeg: 215 };
 
 function computeEnvironment(elevationDeg: number, azimuthDeg: number) {
   const e = elevationDeg * DEG;
@@ -531,11 +533,9 @@ function computeEnvironment(elevationDeg: number, azimuthDeg: number) {
     skyColor: mix("#1a2744", "#cfe3ff", day),
     groundColor: mix("#0a0d12", "#56663f", day),
     hemiIntensity: lerp(0.35, 1.0, day),
-    moonIntensity: 0.4 * (1 - day),
     fogColor: mix("#0a1224", "#c8daea", day).lerp(new THREE.Color("#f0a878"), golden * 0.5),
     groundTint: mix("#18221a", "#5f7d45", day),
     rayleigh: lerp(0.4, 1.5, day) + golden * 1.5,
-    night: 1 - day,
   };
 }
 
@@ -545,7 +545,6 @@ function Atmosphere({ elevationDeg, azimuthDeg }: { elevationDeg: number; azimut
   return (
     <>
       <Sky distance={450000} sunPosition={env.sunDir} turbidity={8} rayleigh={env.rayleigh} mieCoefficient={0.005} mieDirectionalG={0.8} />
-      {env.night > 0.4 && <Stars radius={900} depth={200} count={4000} factor={5} saturation={0} fade speed={0.3} />}
       <fog attach="fog" args={[env.fogColor, 350, 1900]} />
       <hemisphereLight color={env.skyColor} groundColor={env.groundColor} intensity={env.hemiIntensity} />
       <directionalLight
@@ -558,7 +557,6 @@ function Atmosphere({ elevationDeg, azimuthDeg }: { elevationDeg: number; azimut
       >
         <orthographicCamera attach="shadow-camera" args={[-170, 170, 170, -170, 1, 1400]} />
       </directionalLight>
-      <directionalLight position={[-200, 300, 150]} color="#9bb4ff" intensity={env.moonIntensity} />
       <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
         <circleGeometry args={[2600, 64]} />
         <meshStandardMaterial color={env.groundTint} roughness={1} />
@@ -835,21 +833,12 @@ export default function Turbine3D({
   ...props
 }: Turbine3DProps) {
   const calloutRegistry = useRef<CalloutRegistry>(new Map());
-  const [now, setNow] = useState(() => new Date());
   const [canvasKey, setCanvasKey] = useState(0);
 
-  useEffect(() => {
-    const id = setInterval(() => setNow(new Date()), 60_000);
-    return () => clearInterval(id);
-  }, []);
-
-  const sun = useMemo(() => sunPosition(now), [now]);
-  const nightFactor = 1 - smoothstep(sun.elevationDeg, -8, 12);
-
   // Values read inside the render loop without re-creating it.
-  const liveRef = useRef<LiveInputs>({ ...props, nightFactor });
+  const liveRef = useRef<LiveInputs>({ ...props });
   useEffect(() => {
-    liveRef.current = { ...props, nightFactor };
+    liveRef.current = { ...props };
   });
 
   /* ---------------- Exploration state (hover / select / open a part) ---------------- */
@@ -871,7 +860,7 @@ export default function Turbine3D({
     setSelectedId(id);
     const info = PART_INFO[id];
     const opened = info.opens ? (id as OpenableId) : info.parent;
-    if (!opened) return; // e.g. the hub: just show its card
+    if (!opened) return;
     setOpenPart(opened);
     const f = info.focus ?? PART_INFO[opened].focus ?? TOWER_OPEN_FOCUS;
     setFocus(resolveFocus(f, yawRef.current)); // always a new object: re-fly even if unchanged
@@ -955,7 +944,7 @@ export default function Turbine3D({
             else if (selectedId !== openPart) setSelectedId(openPart);
           }}
         >
-          <Atmosphere elevationDeg={sun.elevationDeg} azimuthDeg={sun.azimuthDeg} />
+          <Atmosphere elevationDeg={DAYLIGHT_SUN.elevationDeg} azimuthDeg={DAYLIGHT_SUN.azimuthDeg} />
           <TurbineModel liveRef={liveRef} workLightYRef={workLightYRef} yawOutRef={yawRef} />
           <WindParticles liveRef={liveRef} />
           <HoverLabel />

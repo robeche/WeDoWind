@@ -4,8 +4,8 @@
  */
 
 /** Exterior parts that can be opened to show what is inside. */
-export type OpenableId = "tower" | "nacelle" | "generator" | "blades";
-export type ExteriorPartId = OpenableId | "hub";
+export type OpenableId = "tower" | "nacelle" | "generator" | "hub" | "blades";
+export type ExteriorPartId = OpenableId;
 export type TowerPartId =
   | "ladder"
   | "lift"
@@ -24,17 +24,18 @@ export type BladePartId =
   | "shearWebs"
   | "bladeShell"
   | "bladeRoot"
-  | "pitchSystem"
   | "lightning"
   | "leadingEdge";
-export type SubPartId = TowerPartId | NacellePartId | GeneratorPartId | BladePartId;
+export type HubPartId = "pitchBearings" | "pitchMotors" | "bladeCabinets" | "hubCabinet" | "hubCables";
+export type SubPartId = TowerPartId | NacellePartId | GeneratorPartId | HubPartId | BladePartId;
 export type PartId = ExteriorPartId | SubPartId;
 
 /**
  * Coordinate frame of a focus target:
  * - world:   scene coordinates (tower)
  * - nacelle: the tilted nacelle frame (origin on the shaft axis above the tower, +Z towards the rotor)
- * - blade:   the inspected blade (origin at the hub centre, +Y along the span), parked horizontally
+ * - blade:   the inspected blade (origin at the hub centre, +Y along the span), parked horizontally;
+ *            also used for the hub, whose rotor is parked the same way
  */
 export type Frame = "world" | "nacelle" | "blade";
 
@@ -93,7 +94,11 @@ export const EXTERIOR_PARTS: Record<ExteriorPartId, PartInfo> = {
     id: "hub",
     name: "Hub",
     description:
-      "Holds the three blades. Inside, each blade has its own electric pitch drive with emergency power, so it can be turned to control power or to stop the rotor.",
+      "Holds the three blades and turns them on their bearings to control power. Tap it to look inside.",
+    opens: true,
+    intro:
+      "The rotor stops so you can look inside the hub. Each blade sits on a large pitch bearing; electric motors turn it to the best angle for the wind, or to 90° (feathered) to stop the rotor. Watch the blades pitch back and forth.",
+    focus: { target: [0, 0.3, 0.3], distance: 13, elevationDeg: 14, frame: "blade", viewDir: [0.55, 0, 1] },
   },
   blades: {
     id: "blades",
@@ -304,15 +309,8 @@ export const BLADE_PARTS: Record<BladePartId, PartInfo> = {
     id: "bladeRoot",
     name: "Blade root",
     description:
-      "The thick, round end of the blade. A ring of steel bolts set into the laminate fastens it to the pitch bearing in the hub.",
+      "The thick, round end of the blade. A ring of steel bolts set into the laminate fastens it to the pitch bearing in the hub (open the hub to see the pitch system).",
     focus: bladeFocus(2.5, 8),
-  },
-  pitchSystem: {
-    id: "pitchSystem",
-    name: "Pitch system",
-    description:
-      "Each blade has its own electric pitch drive with emergency power. It turns the blade on its bearing to control power — and to feather the blades and stop the rotor safely.",
-    focus: bladeFocus(1.5, 8),
   },
   lightning: {
     id: "lightning",
@@ -330,6 +328,52 @@ export const BLADE_PARTS: Record<BladePartId, PartInfo> = {
   },
 };
 
+const hubFocus = (target: [number, number, number], distance = 6, viewDir: [number, number, number] = [0.45, 0, 1]): Focus => ({
+  target,
+  distance,
+  elevationDeg: 14,
+  frame: "blade",
+  viewDir,
+});
+
+export const HUB_PARTS: Record<HubPartId, PartInfo> = {
+  pitchBearings: {
+    id: "pitchBearings",
+    name: "Pitch bearings",
+    description:
+      "Each blade is bolted to a huge ring bearing about 3 m across. The outer ring is fixed to the hub; the inner ring, with teeth on its inside, is bolted to the blade and turns with it.",
+    focus: hubFocus([0, 1.7, 0.2], 8),
+  },
+  pitchMotors: {
+    id: "pitchMotors",
+    name: "Pitch motors",
+    description:
+      "Two electric motors per blade drive small pinions through gearboxes. The pinions mesh with the bearing's teeth and turn the blade a fraction of a degree at a time — or all the way to 90° to stop the rotor.",
+    focus: hubFocus([0.6, 1.3, 0.9], 7),
+  },
+  bladeCabinets: {
+    id: "bladeCabinets",
+    name: "Pitch cabinets",
+    description:
+      "One cabinet per blade holds the motor drives and an emergency power store. If the grid fails, it still has enough energy to feather its blade and bring the rotor safely to a stop.",
+    focus: hubFocus([0, 0.95, -0.7], 7, [0.8, 0, 0.6]),
+  },
+  hubCabinet: {
+    id: "hubCabinet",
+    name: "Hub control cabinet",
+    description:
+      "The hub's own controller. It receives the pitch commands from the nacelle and coordinates the three blade cabinets so all blades move together.",
+    focus: hubFocus([0, 0, 1.2], 7, [0.35, 0, 1]),
+  },
+  hubCables: {
+    id: "hubCables",
+    name: "Hub cabling",
+    description:
+      "Power and signals reach the spinning hub through slip rings at its back. From the hub cabinet, cables run to each pitch cabinet and on to every pitch motor.",
+    focus: hubFocus([0, 0.6, 0], 8),
+  },
+};
+
 const withParent = <T extends string>(parts: Record<T, PartInfo>, parent: OpenableId) =>
   Object.fromEntries(Object.entries<PartInfo>(parts).map(([k, v]) => [k, { ...v, parent }])) as Record<T, PartInfo>;
 
@@ -337,6 +381,7 @@ export const SUB_PARTS: Record<SubPartId, PartInfo> = {
   ...withParent(TOWER_PARTS, "tower"),
   ...withParent(NACELLE_PARTS, "nacelle"),
   ...withParent(GENERATOR_PARTS, "generator"),
+  ...withParent(HUB_PARTS, "hub"),
   ...withParent(BLADE_PARTS, "blades"),
 };
 
@@ -351,7 +396,8 @@ export const OPEN_CHILDREN: Record<OpenableId, SubPartId[]> = {
   tower: ["converter", "transformer", "switchgear", "controlCabinet", "cables", "dataCables", "lift", "ladder", "platforms", "lights"],
   nacelle: ["mainCarrier", "yawDrives", "nacelleCabinets", "cooling", "nacelleCables"],
   generator: ["stator", "genRotor", "airGap", "excitation", "axle"],
-  blades: ["sparCaps", "shearWebs", "bladeShell", "bladeRoot", "pitchSystem", "lightning", "leadingEdge"],
+  hub: ["pitchBearings", "pitchMotors", "bladeCabinets", "hubCabinet", "hubCables"],
+  blades: ["sparCaps", "shearWebs", "bladeShell", "bladeRoot", "lightning", "leadingEdge"],
 };
 
 /** Quick-jump levels inside the open tower. */
