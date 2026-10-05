@@ -317,6 +317,7 @@ export default function MobileKiosk({
           nacelleYawDeg={live?.nacelleYawDeg ?? windDirection}
           windDirectionDeg={windDirection}
           windSpeedMs={windSpeed}
+          powerKw={metrics.powerKw}
           status={status}
           hasData={ready}
           onExploringChange={setExploring}
@@ -367,7 +368,7 @@ export default function MobileKiosk({
       >
         <MessageTicker compact />
         <p className="mt-1.5 text-center text-[0.6rem] text-white/50">
-          Live data: Ambition Community Energy (CC-BY-4.0) · DOI 10.5281/zenodo.22662372
+          Live data: Ambition Community Energy (CC-BY-4.0) · DOI 10.5281/zenodo.22662372 · Grid © OpenStreetMap
         </p>
       </footer>
 

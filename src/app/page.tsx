@@ -168,6 +168,7 @@ export default function KioskPage() {
               nacelleYawDeg={live?.nacelleYawDeg ?? windDirection}
               windDirectionDeg={windDirection}
               windSpeedMs={windSpeed}
+          powerKw={metrics.powerKw}
               status={status}
               hasData={ready}
               onExploringChange={setExploring}
@@ -345,7 +346,7 @@ export default function KioskPage() {
       <MessageTicker />
 
       <footer className="flex items-center justify-between gap-6 text-[clamp(0.75rem,1.6vh,1.2rem)] text-white/55">
-        <span>Live data provided by Ambition Community Energy (ACE) under CC-BY-4.0 | WeDoWind Challenge 5</span>
+        <span>Live data provided by Ambition Community Energy (ACE) under CC-BY-4.0 | Grid lines © OpenStreetMap contributors | WeDoWind Challenge 5</span>
         <span className="text-right">
           Data DOI 10.5281/zenodo.22662372
           {COMMUNITY_FUND_GBP_PER_KWH !== null && " · *Community fund figures are estimates"}

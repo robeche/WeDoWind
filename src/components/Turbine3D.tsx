@@ -30,6 +30,7 @@ import { NacelleInterior, YawSystem } from "./turbine/NacelleInterior";
 import { PART_INFO, TOWER_OPEN_FOCUS, type Focus, type OpenableId, type PartId } from "./turbine/parts";
 import TowerInterior from "./turbine/TowerInterior";
 import SiteSplat from "./turbine/SiteSplat";
+import GridFlow from "./turbine/GridFlow";
 
 const CAMERA_TARGET: [number, number, number] = [0, 78, 0];
 const HOME_FOCUS: Focus = { target: CAMERA_TARGET, distance: 270, elevationDeg: 5 };
@@ -58,6 +59,8 @@ export interface Turbine3DProps {
   /** Direction wind blows from, degrees clockwise from north. */
   windDirectionDeg: number;
   windSpeedMs: number;
+  /** Live active power (kW): drives the energy flowing into the grid around the site. */
+  powerKw?: number;
   status: TurbineStatus;
   hasData: boolean;
   className?: string;
@@ -963,6 +966,7 @@ export default function Turbine3D({
             groundY={site ? -2.5 : 0}
           />
           {site && <SiteSplat compact={compact} />}
+          {site && <GridFlow liveRef={liveRef} />}
           <TurbineModel liveRef={liveRef} workLightYRef={workLightYRef} yawOutRef={yawRef} />
           <WindParticles liveRef={liveRef} />
           <HoverLabel />
