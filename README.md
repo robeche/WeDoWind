@@ -44,6 +44,14 @@ ENERCON E-115 E3, 4.2 MW: 115.7 m rotor (56 m blades), ~92 m hub height, 150 m t
 The 3D twin in `src/components/Turbine3D.tsx` is built to these dimensions (1 unit = 1 m), with the
 EP3-style faceted nacelle and ring generator.
 
+### Site surroundings (Gaussian splat)
+
+`public/splats/lawrence-weston.splat` (≈1.1 M splats, 38 MB) and `lawrence-weston-lite.splat` (400 k, phones)
+are a 3D Gaussian splat of the real site, trained from a 360° Google Earth Studio orbit with COLMAP + Brush
+(pipeline and re-training notes in `GEarth/splat_work/README.md`). They are already in scene units
+(1 unit = 1 m, Y up, tower axis at the origin, -Z north) with the Google Earth turbine cut out, and are
+drawn by `src/components/turbine/SiteSplat.tsx`. Pass `site={false}` to `Turbine3D` to hide them.
+
 ## Configuration
 
 Copy `.env.example` to `.env.local`:

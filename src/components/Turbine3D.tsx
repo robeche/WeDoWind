@@ -29,6 +29,7 @@ import { HoverLabel, InteractionProvider, Part, useInteraction, type Interaction
 import { NacelleInterior, YawSystem } from "./turbine/NacelleInterior";
 import { PART_INFO, TOWER_OPEN_FOCUS, type Focus, type OpenableId, type PartId } from "./turbine/parts";
 import TowerInterior from "./turbine/TowerInterior";
+import SiteSplat from "./turbine/SiteSplat";
 
 const CAMERA_TARGET: [number, number, number] = [0, 78, 0];
 const HOME_FOCUS: Focus = { target: CAMERA_TARGET, distance: 270, elevationDeg: 5 };
@@ -66,9 +67,11 @@ export interface Turbine3DProps {
   compact?: boolean;
   /** Floating signs around the turbine (phone layout). */
   callouts?: CalloutSpec[];
+  /** Show the photogrammetric site (Gaussian splat of the real surroundings). Default true. */
+  site?: boolean;
 }
 
-type LiveInputs = Omit<Turbine3DProps, "className" | "onExploringChange" | "compact" | "callouts">;
+type LiveInputs = Omit<Turbine3DProps, "className" | "onExploringChange" | "compact" | "callouts" | "site">;
 
 /* ------------------------------------------------------------------ */
 /* Procedural geometry                                                 */
@@ -539,7 +542,16 @@ function computeEnvironment(elevationDeg: number, azimuthDeg: number) {
   };
 }
 
-function Atmosphere({ elevationDeg, azimuthDeg }: { elevationDeg: number; azimuthDeg: number }) {
+function Atmosphere({
+  elevationDeg,
+  azimuthDeg,
+  groundY = 0,
+}: {
+  elevationDeg: number;
+  azimuthDeg: number;
+  /** Lowered under the site splat so its photographed ground is not hidden by the plain disc. */
+  groundY?: number;
+}) {
   const env = useMemo(() => computeEnvironment(elevationDeg, azimuthDeg), [elevationDeg, azimuthDeg]);
 
   return (
@@ -557,7 +569,7 @@ function Atmosphere({ elevationDeg, azimuthDeg }: { elevationDeg: number; azimut
       >
         <orthographicCamera attach="shadow-camera" args={[-170, 170, 170, -170, 1, 1400]} />
       </directionalLight>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, groundY, 0]} receiveShadow>
         <circleGeometry args={[2600, 64]} />
         <meshStandardMaterial color={env.groundTint} roughness={1} />
       </mesh>
@@ -830,6 +842,7 @@ export default function Turbine3D({
   onExploringChange,
   compact = false,
   callouts,
+  site = true,
   ...props
 }: Turbine3DProps) {
   const calloutRegistry = useRef<CalloutRegistry>(new Map());
@@ -944,7 +957,12 @@ export default function Turbine3D({
             else if (selectedId !== openPart) setSelectedId(openPart);
           }}
         >
-          <Atmosphere elevationDeg={DAYLIGHT_SUN.elevationDeg} azimuthDeg={DAYLIGHT_SUN.azimuthDeg} />
+          <Atmosphere
+            elevationDeg={DAYLIGHT_SUN.elevationDeg}
+            azimuthDeg={DAYLIGHT_SUN.azimuthDeg}
+            groundY={site ? -2.5 : 0}
+          />
+          {site && <SiteSplat compact={compact} />}
           <TurbineModel liveRef={liveRef} workLightYRef={workLightYRef} yawOutRef={yawRef} />
           <WindParticles liveRef={liveRef} />
           <HoverLabel />
