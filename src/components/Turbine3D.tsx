@@ -21,6 +21,7 @@ import { attachBladeHitRaycast, createBladeGeometry, createBladeHitGeometry } fr
 import { BladeInternalsMemo } from "./turbine/BladeStructure";
 import { HubInternalsMemo } from "./turbine/HubInternals";
 import { GeneratorRotor, GeneratorStatic } from "./turbine/GeneratorInternals";
+import { fitDistance } from "./turbine/framing";
 import { latheAlongZ } from "./turbine/geometry";
 import InfoPanel from "./turbine/InfoPanel";
 import { bladeLivery, nacelleLivery } from "./turbine/livery";
@@ -664,14 +665,30 @@ const CameraRig = memo(function CameraRig({
     if (dir.lengthSq() < 1e-6) dir.set(0, 0, 1);
     dir.normalize();
     const elev = goal.elevationDeg * DEG;
-    const toPos = toTarget
-      .clone()
-      .addScaledVector(dir, goal.distance * Math.cos(elev))
-      .add(new THREE.Vector3(0, goal.distance * Math.sin(elev), 0));
+    // Unit vector from the target towards the camera.
+    const camDir = dir.clone().multiplyScalar(Math.cos(elev)).setY(Math.sin(elev));
+    // Back off until the focus' "fit" points are visible beside the (soon open) info panel.
+    const distance = goal.fit?.length
+      ? fitDistance(
+          toTarget,
+          camDir,
+          goal.distance,
+          goal.fit.map((p) => new THREE.Vector3(...p)),
+          {
+            width: size.width,
+            height: size.height,
+            fov: (camera as THREE.PerspectiveCamera).fov,
+            shift: focus ? (compactRef.current ? PANEL_SHIFT_COMPACT : PANEL_SHIFT) : 0,
+            compact: compactRef.current,
+          },
+        )
+      : goal.distance;
+    const toPos = toTarget.clone().addScaledVector(camDir, distance);
     flight.current = { t: 0, fromTarget, toTarget, fromPos: camera.position.clone(), toPos };
     clearTimeout(resumeTimer.current);
     controls.autoRotate = false;
     controls.minDistance = 3; // allow close-ups (and don't clamp mid-flight)
+    // `size` is read but not a dependency: re-fly on a new focus only, not on every resize.
   }, [focus, camera, homeFocus]);
 
   useFrame((_, delta) => {
@@ -774,13 +791,18 @@ function nacelleToWorld(v: THREE.Vector3, yaw: number, point: boolean) {
 
 function resolveFocus(f: Focus, yaw: number): Focus {
   const frame = f.frame ?? "world";
-  const target = new THREE.Vector3(...f.target);
-  if (frame === "blade") {
-    // Inspected blade, parked level: blade frame → rotor frame → nacelle frame.
-    target.applyAxisAngle(AXIS_Z, -BLADE_PARK);
-    target.z += ROTOR_Z;
-  }
-  if (frame !== "world") nacelleToWorld(target, yaw, true);
+  const toWorld = (p: [number, number, number]) => {
+    const v = new THREE.Vector3(...p);
+    if (frame === "blade") {
+      // Inspected blade, parked level: blade frame → rotor frame → nacelle frame.
+      v.applyAxisAngle(AXIS_Z, -BLADE_PARK);
+      v.z += ROTOR_Z;
+    }
+    if (frame !== "world") nacelleToWorld(v, yaw, true);
+    return v.toArray() as [number, number, number];
+  };
+  const target = toWorld(f.target);
+  const fit = f.fit?.map(toWorld);
   let viewDir: [number, number, number] | undefined;
   if (f.viewDir) {
     const d = new THREE.Vector3(...f.viewDir);
@@ -788,7 +810,7 @@ function resolveFocus(f: Focus, yaw: number): Focus {
     d.setY(0).normalize();
     viewDir = d.toArray() as [number, number, number];
   }
-  return { target: target.toArray() as [number, number, number], distance: f.distance, elevationDeg: f.elevationDeg, viewDir };
+  return { target, distance: f.distance, elevationDeg: f.elevationDeg, viewDir, fit };
 }
 
 /* ------------------------------------------------------------------ */

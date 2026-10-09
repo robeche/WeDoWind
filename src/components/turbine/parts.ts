@@ -47,6 +47,11 @@ export interface Focus {
   frame?: Frame;
   /** Preferred horizontal viewing direction (from the target towards the camera), nacelle frame. */
   viewDir?: [number, number, number];
+  /**
+   * Points (same frame as `target`) that must be on screen beside the info panel: the camera
+   * backs off from `distance` until they all fit, whatever the screen's shape.
+   */
+  fit?: Array<[number, number, number]>;
 }
 
 export interface PartInfo {
@@ -107,7 +112,16 @@ export const EXTERIOR_PARTS: Record<ExteriorPartId, PartInfo> = {
     opens: true,
     intro:
       "The rotor stops so you can look inside one blade. ENERCON lists the blade materials as glass-fibre reinforced epoxy (GRP), balsa wood and foam; the internal layout shown here is a typical design for blades of this size.",
-    focus: { target: [0, 28, 0], distance: 34, elevationDeg: 10, frame: "blade", viewDir: [0.75, 0, 0.66] },
+    // Aim at the blade root (just outside the spinner) and keep at least half the blade in view:
+    // seen from upwind and slightly from the hub side, the blade runs away from the root.
+    focus: {
+      target: [0, 4, 0],
+      fit: [[0, 31, 0]], // half span (56 m blade from r = 1.85 m) plus a little
+      distance: 30,
+      elevationDeg: 12,
+      frame: "blade",
+      viewDir: [-0.3, 0, 1],
+    },
   },
 };
 
