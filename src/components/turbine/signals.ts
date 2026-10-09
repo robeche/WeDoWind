@@ -95,6 +95,8 @@ interface SignalGroupSpec {
   at: Anchor;
   /** Box title; defaults to the component's name. */
   title?: string;
+  /** Preferred screen direction of the box from its anchor (degrees, 0 = right, 90 = up). */
+  dir?: number;
   signals: SignalSpec[];
 }
 
@@ -113,10 +115,11 @@ const nacellePoint = (name: string, target: [number, number, number]): Anchor =>
 
 /** Boxes on the turbine while nobody is exploring: the headline machine signals. */
 const OVERVIEW_GROUPS: SignalGroupSpec[] = [
-  { at: nacellePoint("Rotor", [0, 0, ROTOR_Z + 2.8]), signals: [SPECS.rotorSpeed] },
-  { at: nacellePoint("Blade pitch", [0, 30, ROTOR_Z]), signals: [SPECS.pitch] },
-  { at: nacellePoint("Generator", [0, 3.2, ROTOR_Z - 1.8]), signals: [SPECS.power, SPECS.capacity] },
-  { at: nacellePoint("Nacelle direction", [0, 1.6, -3.5 - NACELLE_STRETCH]), signals: [SPECS.heading, SPECS.yawError] },
+  // Each box gets its own side of the turbine so they spread around it instead of bunching up.
+  { at: nacellePoint("Rotor", [0, 0, ROTOR_Z + 2.8]), dir: 195, signals: [SPECS.rotorSpeed] },
+  { at: nacellePoint("Blade pitch", [0, 30, ROTOR_Z]), dir: 140, signals: [SPECS.pitch] },
+  { at: nacellePoint("Generator", [0, 3.2, ROTOR_Z - 1.8]), dir: 40, signals: [SPECS.power, SPECS.capacity] },
+  { at: nacellePoint("Nacelle direction", [0, 1.6, -3.5 - NACELLE_STRETCH]), dir: -25, signals: [SPECS.heading, SPECS.yawError] },
 ];
 
 /** One floating box per component, for each opened part. */
@@ -173,6 +176,8 @@ export interface SignalGroup {
   focus: Focus;
   /** The selected component's own box. */
   highlight: boolean;
+  /** Preferred screen direction from the anchor (degrees, 0 = right, 90 = up). */
+  dir?: number;
   rows: SignalRow[];
 }
 
@@ -213,6 +218,7 @@ function buildGroups(specs: SignalGroupSpec[], selectedId: PartId | null, snapsh
       title: g.title ?? (isPart ? PART_INFO[g.at as PartId].name : (g.at as { name: string }).name),
       focus,
       highlight: isPart && selectedId === g.at,
+      dir: g.dir,
       rows,
     });
   }

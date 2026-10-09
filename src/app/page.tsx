@@ -3,8 +3,11 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { Maximize, Minimize, RefreshCw, Wind } from "lucide-react";
 import dynamic from "next/dynamic";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { buildCallouts } from "@/components/FloatingSigns";
+import TabBar, { type KioskTab } from "@/components/TabBar";
+import StatsView from "@/components/analytics/StatsView";
+import TrendsView from "@/components/analytics/TrendsView";
 import MessageTicker from "@/components/MessageTicker";
 import MobileKiosk from "@/components/MobileKiosk";
 import SafeBoundary from "@/components/SafeBoundary";
@@ -47,6 +50,7 @@ export default function KioskPage() {
   const [exploring, setExploring] = useState(false);
   // Phones get a full-screen turbine with the figures floating around it.
   const isMobile = useIsMobile();
+  const [tab, setTab] = useKioskTab();
 
   const metrics = useMemo(() => computeCommunityMetrics(live, history), [live, history]);
   const ready = live !== null;
@@ -68,6 +72,8 @@ export default function KioskPage() {
         connecting={connecting}
         reconnecting={reconnecting}
         lastUpdated={lastUpdated}
+        tab={tab}
+        onTabChange={setTab}
       />
     );
   }
@@ -91,6 +97,7 @@ export default function KioskPage() {
         </div>
 
         <div className="flex shrink-0 items-center gap-[2vh]">
+          <TabBar tab={tab} onChange={setTab} />
           <div className={`flex items-center gap-3 rounded-full px-[2vh] py-[1vh] ring-1 ${statusStyle.pill}`}>
             <span className="relative flex size-[1.8vh]">
               {status === "Generating" && (
@@ -120,7 +127,9 @@ export default function KioskPage() {
       </header>
 
       {/* The live 3D twin fills the screen; the community figures float around the turbine. */}
-      <section className="relative min-h-0 flex-1 overflow-hidden rounded-3xl border border-white/10 bg-slate-900">
+      <section
+        className={`relative min-h-0 flex-1 overflow-hidden rounded-3xl border border-white/10 bg-slate-900 ${tab === "live" ? "" : "hidden"}`}
+      >
         <SafeBoundary name="Turbine3D" fallback={<SceneMessage text="Restarting the 3D turbine…" />} retryAfterMs={20_000}>
           <Turbine3D
             className="absolute inset-0"
@@ -160,6 +169,14 @@ export default function KioskPage() {
         )}
       </section>
 
+      {tab !== "live" && (
+        <section className="relative min-h-0 flex-1 overflow-y-auto rounded-3xl border border-white/10 bg-slate-900">
+          <SafeBoundary name="Analytics" fallback={<SceneMessage text="Restarting the charts…" />} retryAfterMs={10_000}>
+            {tab === "trends" ? <TrendsView active /> : <StatsView active />}
+          </SafeBoundary>
+        </section>
+      )}
+
       <MessageTicker />
 
       <footer className="flex items-center justify-between gap-6 text-[clamp(0.75rem,1.6vh,1.2rem)] text-white/55">
@@ -187,4 +204,26 @@ export default function KioskPage() {
       </AnimatePresence>
     </main>
   );
+}
+
+/** Kiosk tab state: falls back to the live 3D view after a few minutes without input. */
+const TAB_IDLE_MS = 3 * 60_000;
+
+function useKioskTab(): [KioskTab, (t: KioskTab) => void] {
+  const [tab, setTab] = useState<KioskTab>("live");
+  useEffect(() => {
+    if (tab === "live") return;
+    let last = Date.now();
+    const touch = () => (last = Date.now());
+    const events = ["pointerdown", "pointermove", "keydown", "wheel"] as const;
+    events.forEach((e) => window.addEventListener(e, touch, { passive: true }));
+    const id = setInterval(() => {
+      if (Date.now() - last > TAB_IDLE_MS) setTab("live");
+    }, 10_000);
+    return () => {
+      clearInterval(id);
+      events.forEach((e) => window.removeEventListener(e, touch));
+    };
+  }, [tab]);
+  return [tab, setTab];
 }

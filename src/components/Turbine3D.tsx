@@ -970,6 +970,8 @@ export default function Turbine3D({
   const [focus, setFocus] = useState<Focus | null>(null);
   const signalRegistry = useRef<SignalRegistry>(new Map());
   const freeRef = useRef<FreeArea>({ right: 1, bottom: 1 });
+  /** Desktop overview: turbine boxes stand well clear of the turbine (fraction of the view height). */
+  const spreadRef = useRef(0);
   const workLightYRef = useRef(8);
   const yawRef = useRef(0);
   const lastInputRef = useRef(Date.now());
@@ -1014,6 +1016,7 @@ export default function Turbine3D({
     right: panelOpen && !compact ? 1 - 2 * PANEL_SHIFT : 1,
     bottom: panelOpen && compact ? 1 - 2 * PANEL_SHIFT_COMPACT : 1,
   };
+  spreadRef.current = !compact && !openPart ? 0.2 : 0;
   // Live-signal boxes: beside the components of the opened part, or on the turbine in the overview.
   const snapshot = props.snapshot ?? null;
   const groups = openPart
@@ -1095,7 +1098,7 @@ export default function Turbine3D({
           <WindParticles liveRef={liveRef} />
           <HoverLabel />
           {callouts && <CalloutProjector registry={calloutRegistry} yawRef={yawRef} />}
-          <SignalProjector registry={signalRegistry} freeRef={freeRef} resolve={resolveAnchor} />
+          <SignalProjector registry={signalRegistry} freeRef={freeRef} resolve={resolveAnchor} spreadRef={spreadRef} />
           <CameraRig
             focus={focus}
             panelOpen={panelOpen}

@@ -1,8 +1,9 @@
 "use client";
 
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo } from "react";
-import { STALE_AFTER_MS, getHistory, getLive, type HistorySeries, type LiveSnapshot } from "@/services/aceApi";
+import { STALE_AFTER_MS, getHistory, getLive, getStats, getTrends, type HistorySeries, type LiveSnapshot } from "@/services/aceApi";
+import type { StatsData, TrendData } from "@/services/aceSeries";
 
 export const LIVE_POLL_MS = 5_000;
 const HISTORY_POLL_MS = 5 * 60_000;
@@ -88,4 +89,30 @@ export function useTurbineHistory(hours = 24) {
     retryDelay: 5_000,
   });
   return query.data ?? null;
+}
+
+/** Instantaneous data for the "Last hours" tab; only polled while that tab is shown. */
+export function useTrends(window: "1h" | "6h" | "24h", enabled: boolean) {
+  return useQuery<TrendData>({
+    queryKey: ["ace", "trends", window],
+    queryFn: ({ signal }) => getTrends(window, signal),
+    enabled,
+    refetchInterval: window === "1h" ? 15_000 : 60_000,
+    staleTime: window === "1h" ? 10_000 : 50_000,
+    placeholderData: keepPreviousData,
+    retry: 1,
+  });
+}
+
+/** 10-minute statistics for the "Statistics" tab (server-cached for 10 minutes). */
+export function useStats(days: 7 | 30 | 90, enabled: boolean) {
+  return useQuery<StatsData>({
+    queryKey: ["ace", "stats", days],
+    queryFn: ({ signal }) => getStats(days, signal),
+    enabled,
+    refetchInterval: 10 * 60_000,
+    staleTime: 5 * 60_000,
+    placeholderData: keepPreviousData,
+    retry: 1,
+  });
 }

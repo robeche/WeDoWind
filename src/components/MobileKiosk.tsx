@@ -13,6 +13,9 @@ import { useState } from "react";
 import MessageTicker from "@/components/MessageTicker";
 import SafeBoundary from "@/components/SafeBoundary";
 import { buildCallouts } from "@/components/FloatingSigns";
+import TabBar, { type KioskTab } from "@/components/TabBar";
+import StatsView from "@/components/analytics/StatsView";
+import TrendsView from "@/components/analytics/TrendsView";
 import type { LiveSnapshot, TurbineStatus } from "@/services/aceApi";
 import type { CommunityMetrics } from "@/utils/metrics";
 import { formatUkDate, formatUkTime } from "@/utils/sun";
@@ -35,6 +38,8 @@ export interface MobileKioskProps {
   connecting: boolean;
   reconnecting: boolean;
   lastUpdated: number | null;
+  tab: KioskTab;
+  onTabChange: (t: KioskTab) => void;
 }
 
 /* ------------------------------------------------------------------ */
@@ -50,6 +55,8 @@ export default function MobileKiosk({
   connecting,
   reconnecting,
   lastUpdated,
+  tab,
+  onTabChange,
 }: MobileKioskProps) {
   const [exploring, setExploring] = useState(false);
   const ready = live !== null;
@@ -105,12 +112,23 @@ export default function MobileKiosk({
             <div className="mt-0.5 text-[0.62rem] text-white/60">{now ? formatUkDate(now) : ""}</div>
           </div>
         </div>
+        <div className="pointer-events-auto mt-2 flex justify-center">
+          <TabBar tab={tab} onChange={onTabChange} compact />
+        </div>
         {live?.scadaStale && (
           <div className="mt-2 inline-block rounded-full bg-amber-500/25 px-2 py-0.5 text-[0.68rem] ring-1 ring-amber-400/40">
             Latest turbine reading from {formatUkTime(new Date(live.observedAt))}
           </div>
         )}
       </header>
+
+      {tab !== "live" && (
+        <section className="absolute inset-x-0 top-[7.5rem] bottom-[calc(2.75rem+env(safe-area-inset-bottom))] overflow-y-auto bg-slate-950">
+          <SafeBoundary name="Analytics" fallback={<div className="p-6 text-white/70">Restarting the charts…</div>} retryAfterMs={10_000}>
+            {tab === "trends" ? <TrendsView active /> : <StatsView active />}
+          </SafeBoundary>
+        </section>
+      )}
 
       {connecting && (
         <div className="pointer-events-none absolute inset-x-0 top-1/2 text-center text-lg font-semibold text-white/80">
@@ -124,7 +142,7 @@ export default function MobileKiosk({
           exploring ? "opacity-0" : "opacity-100"
         }`}
       >
-        <MessageTicker compact />
+        {tab === "live" && <MessageTicker compact />}
         <p className="mt-1.5 text-center text-[0.6rem] text-white/50">
           Live data: Ambition Community Energy (CC-BY-4.0) · DOI 10.5281/zenodo.22662372 · Grid © OpenStreetMap
         </p>

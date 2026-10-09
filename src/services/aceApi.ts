@@ -254,7 +254,7 @@ const INVERTER_FIELDS = Array.from({ length: 16 }, (_, i) => `inverter_${String(
  * Readings outside this range are treated as "sensor not available": some channels report
  * placeholder values (e.g. 163 °C on the blade sensors, −44 °C on the cooling water).
  */
-const PLAUSIBLE_TEMP_C: [number, number] = [-35, 150];
+export const PLAUSIBLE_TEMP_C: [number, number] = [-35, 150];
 /** The 1-minute families change slowly: fetch them at most this often (shared by all screens). */
 const SLOW_CACHE_MS = 30_000;
 
@@ -294,14 +294,14 @@ function slowCache<T>(load: () => Promise<T>): () => Promise<T> {
   };
 }
 
-async function upstreamJson<T>(path: string, params: Record<string, string>): Promise<T> {
+export async function upstreamJson<T>(path: string, params: Record<string, string>, timeoutMs = UPSTREAM_TIMEOUT_MS): Promise<T> {
   const url = new URL(path, ACE_API_BASE_URL);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
 
   const res = await fetch(url, {
     headers: { Accept: "application/json", "User-Agent": USER_AGENT },
     cache: "no-store",
-    signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   if (!res.ok) throw new AceApiError(`ACE API ${res.status} for ${url.pathname}`, res.status);
   return (await res.json()) as T;
@@ -341,7 +341,7 @@ function pickLatestStatus(events: AceEventRecord[]): TurbineStatusCode | null {
 /* Server-side upstream calls (used by the proxy route handlers)       */
 /* ------------------------------------------------------------------ */
 
-const ASSET_BASE = `/v1/sites/${ACE_SITE_ID}/assets/${ACE_TURBINE_ASSET_ID}`;
+export const ASSET_BASE = `/v1/sites/${ACE_SITE_ID}/assets/${ACE_TURBINE_ASSET_ID}`;
 
 const latestMinute = (family: string, fields: string[]) =>
   upstreamJson<AceDataResponse>(`${ASSET_BASE}/data/${family}/latest`, {
@@ -524,3 +524,9 @@ export const getLive = (signal?: AbortSignal) => proxyJson<LiveSnapshot>("/api/a
 
 export const getHistory = (hours = 24, signal?: AbortSignal) =>
   proxyJson<HistorySeries>(`/api/ace/history?hours=${encodeURIComponent(hours)}`, signal);
+
+export const getTrends = (window: string, signal?: AbortSignal) =>
+  proxyJson<import("./aceSeries").TrendData>(`/api/ace/trends?window=${encodeURIComponent(window)}`, signal);
+
+export const getStats = (days: number, signal?: AbortSignal) =>
+  proxyJson<import("./aceSeries").StatsData>(`/api/ace/stats?days=${encodeURIComponent(days)}`, signal);

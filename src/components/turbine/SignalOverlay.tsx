@@ -15,6 +15,8 @@ import type { SignalGroup } from "./signals";
 
 export interface SignalBoxEntry {
   focus: Focus;
+  /** Preferred direction from the anchor (degrees, 0 = right, 90 = up); else away from the centre. */
+  dir?: number;
   box: HTMLDivElement | null;
   line: SVGLineElement | null;
   dot: SVGCircleElement | null;
@@ -33,7 +35,7 @@ export interface FreeArea {
   bottom: number;
 }
 
-/** How far (px) a box sits from its anchor, away from the middle of the view. */
+/** Default distance (px) of a box from its anchor, away from the middle of the view. */
 const OFFSET = 70;
 const MARGIN = 10;
 const GAP = 8;
@@ -55,6 +57,7 @@ export function SignalLayer({
       registry.current.set(g.key, e);
     }
     e.focus = g.focus;
+    e.dir = g.dir;
     return e;
   };
 
@@ -149,10 +152,13 @@ export function SignalProjector({
   registry,
   freeRef,
   resolve,
+  spreadRef,
 }: {
   registry: React.RefObject<SignalRegistry>;
   freeRef: React.RefObject<FreeArea>;
   resolve: (f: Focus, out: THREE.Vector3) => THREE.Vector3;
+  /** Box distance from its anchor as a fraction of the canvas height (0 = default 70 px). */
+  spreadRef?: React.RefObject<number>;
 }) {
   const v = useRef(new THREE.Vector3());
   const camera = useThree((s) => s.camera);
@@ -165,6 +171,8 @@ export function SignalProjector({
     const B = H * freeRef.current.bottom;
     const cx = R / 2;
     const cy = B / 2;
+    const spread = spreadRef?.current ?? 0;
+    const offset = spread > 0 ? spread * H : OFFSET;
     const slots: Slot[] = [];
 
     registry.current.forEach((e) => {
@@ -184,17 +192,24 @@ export function SignalProjector({
       }
       const w = e.box.offsetWidth;
       const h = e.box.offsetHeight;
-      // Push the box outwards from the middle of the free view.
-      let dx = ax - cx;
-      let dy = ay - cy;
-      const len = Math.hypot(dx, dy);
-      if (len < 1) {
-        dx = -1;
-        dy = -0.6;
+      // Use the box's own direction if it has one, else push it outwards from the middle of the view.
+      let dx: number;
+      let dy: number;
+      if (e.dir !== undefined) {
+        dx = Math.cos((e.dir * Math.PI) / 180);
+        dy = -Math.sin((e.dir * Math.PI) / 180);
+      } else {
+        dx = ax - cx;
+        dy = ay - cy;
+        if (Math.hypot(dx, dy) < 1) {
+          dx = -1;
+          dy = -0.6;
+        }
       }
       const n = Math.hypot(dx, dy);
-      const bx = ax + (dx / n) * OFFSET + (dx >= 0 ? 0 : -w);
-      const by = ay + (dy / n) * OFFSET - h / 2;
+      // Box edge nearest the anchor ends `offset` px away along that direction.
+      const bx = ax + (dx / n) * offset + (dx >= 0 ? 0 : -w);
+      const by = ay + (dy / n) * offset - h / 2;
       slots.push({ e, ax, ay, w, h, x: bx, y: by });
     });
 
