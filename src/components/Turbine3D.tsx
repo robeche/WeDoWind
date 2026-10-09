@@ -17,7 +17,7 @@ import {
   TOWER_TOP_R,
   TWO_PI,
 } from "./turbine/dimensions";
-import { createBladeGeometry } from "./turbine/blade";
+import { attachBladeHitRaycast, createBladeGeometry, createBladeHitGeometry } from "./turbine/blade";
 import { BladeInternalsMemo } from "./turbine/BladeStructure";
 import { HubInternalsMemo } from "./turbine/HubInternals";
 import { GeneratorRotor, GeneratorStatic } from "./turbine/GeneratorInternals";
@@ -141,6 +141,7 @@ function useTurbineGeometries() {
     ];
     return {
       blade: createBladeGeometry(),
+      bladeHit: createBladeHitGeometry(),
       spinner: latheAlongZ(spinnerProfile, 64),
       nacelle: createNacelleGeometry(),
       generator: latheAlongZ(generatorProfile, 96),
@@ -414,6 +415,11 @@ function TurbineModel({
                         side={THREE.DoubleSide}
                         transparent={i === 0}
                       />
+                    </mesh>
+                    {/* Invisible hit area 3× the chord wide so the slender blade is easy to hover/tap;
+                        it ignores rays through the hub, which keeps its own hover and click. */}
+                    <mesh geometry={geo.bladeHit} ref={attachBladeHitRaycast}>
+                      <meshBasicMaterial transparent opacity={0} depthWrite={false} colorWrite={false} side={THREE.DoubleSide} />
                     </mesh>
                   </group>
                 </group>

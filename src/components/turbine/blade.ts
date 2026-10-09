@@ -145,6 +145,101 @@ export function createBladeGeometry(): THREE.BufferGeometry {
 }
 
 /* ------------------------------------------------------------------ */
+/* Pointer hit area                                                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Radius (from the hub centre) inside which the blade hit area never catches the pointer:
+ * clears the spinner (max. 2.75 m from the rotor centre) so the hub keeps its own hover/click.
+ */
+export const BLADE_HIT_HUB_CLEAR = 3.0;
+/** Hit-area width as a multiple of the local chord (3 = three times as wide as the blade). */
+const HIT_WIDTH_FACTOR = 3;
+/** Minimum hit-area width / depth (m), so the slender tip is still easy to tap. */
+const HIT_MIN_WIDTH = 2.4;
+const HIT_MIN_DEPTH = 2.0;
+/** Maximum hit-area depth (m) along the thickness direction, to keep it off the nacelle nose. */
+const HIT_MAX_DEPTH = 3.0;
+
+/**
+ * Invisible, fattened copy of the blade used only for raycasting: an elliptical tube that
+ * follows the blade's twist and pre-bend, HIT_WIDTH_FACTOR × the chord wide, starting
+ * outside the spinner and running a little past the tip.
+ */
+export function createBladeHitGeometry(): THREE.BufferGeometry {
+  const SECTIONS = 28;
+  const RING = 16;
+  const t0 = spanT(BLADE_HIT_HUB_CLEAR);
+  const positions: number[] = [];
+  const indices: number[] = [];
+  const p = new THREE.Vector3();
+  const centres: THREE.Vector3[] = [];
+
+  for (let i = 0; i < SECTIONS; i++) {
+    const sec = bladeSection(lerp(t0, 1, i / (SECTIONS - 1)));
+    const halfW = Math.max(HIT_WIDTH_FACTOR * sec.chord, HIT_MIN_WIDTH) / 2;
+    const depth = THREE.MathUtils.clamp(HIT_WIDTH_FACTOR * sec.chord * sec.thickness, HIT_MIN_DEPTH, HIT_MAX_DEPTH);
+    const midA = (sec.pivot - 0.5) * sec.chord; // centred on mid-chord, like the real section
+    centres.push(abToLocal(sec, midA, 0));
+    for (let k = 0; k < RING; k++) {
+      const ang = (k / RING) * Math.PI * 2;
+      abToLocal(sec, midA + halfW * Math.cos(ang), (depth / 2) * Math.sin(ang), p);
+      positions.push(p.x, p.y, p.z);
+    }
+  }
+  for (let i = 0; i < SECTIONS - 1; i++) {
+    for (let k = 0; k < RING; k++) {
+      const a = i * RING + k;
+      const b = i * RING + ((k + 1) % RING);
+      const c = (i + 1) * RING + k;
+      const d = (i + 1) * RING + ((k + 1) % RING);
+      indices.push(a, b, c, b, d, c);
+    }
+  }
+  // Caps: root (flat) and tip (pointed, 1.5 m past the real tip).
+  const rootIndex = positions.length / 3;
+  positions.push(centres[0].x, centres[0].y, centres[0].z);
+  const tip = centres[SECTIONS - 1];
+  const tipIndex = rootIndex + 1;
+  positions.push(tip.x, ROTOR_RADIUS + 1.5, tip.z);
+  const last = (SECTIONS - 1) * RING;
+  for (let k = 0; k < RING; k++) {
+    indices.push(rootIndex, (k + 1) % RING, k);
+    indices.push(last + k, last + ((k + 1) % RING), tipIndex);
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setIndex(indices);
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+const _hubCentre = new THREE.Vector3();
+
+/**
+ * Raycast for the blade hit area: ignores any ray that passes through the hub (within
+ * BLADE_HIT_HUB_CLEAR of the rotor centre), so the fattened blades never steal the hub's
+ * hover or click from any viewing angle. The mesh must sit in a blade frame whose origin is
+ * the rotor centre (true for the rotor/pitch groups in Turbine3D).
+ */
+export function hubAwareRaycast(this: THREE.Mesh, raycaster: THREE.Raycaster, intersects: THREE.Intersection[]) {
+  _hubCentre.setFromMatrixPosition(this.matrixWorld);
+  if (raycaster.ray.distanceSqToPoint(_hubCentre) < BLADE_HIT_HUB_CLEAR ** 2) return;
+  THREE.Mesh.prototype.raycast.call(this, raycaster, intersects);
+}
+
+/**
+ * Stable ref callback for the blade hit mesh. Stores the hub-aware raycast as the mesh's
+ * "own" raycast so <Part> keeps using it (and can still switch it off when disabled).
+ */
+export function attachBladeHitRaycast(mesh: THREE.Mesh | null) {
+  if (!mesh || mesh.userData.ownRaycast) return;
+  mesh.userData.ownRaycast = hubAwareRaycast;
+  mesh.raycast = hubAwareRaycast;
+}
+
+/* ------------------------------------------------------------------ */
 /* Internal structure                                                  */
 /* ------------------------------------------------------------------ */
 
