@@ -897,8 +897,6 @@ export default function Turbine3D({
   const [selectedId, setSelectedId] = useState<PartId | null>(null);
   const [openPart, setOpenPart] = useState<OpenableId | null>(null);
   const [focus, setFocus] = useState<Focus | null>(null);
-  /** The visitor folded the info panel away (the view re-centres; the signal boxes stay). */
-  const [panelHidden, setPanelHidden] = useState(false);
   const signalRegistry = useRef<SignalRegistry>(new Map());
   const freeRef = useRef<FreeArea>({ right: 1, bottom: 1 });
   const workLightYRef = useRef(8);
@@ -922,7 +920,6 @@ export default function Turbine3D({
   }, []);
 
   const close = useCallback(() => {
-    setPanelHidden(false);
     setOpenPart(null);
     setSelectedId(null);
     setHoveredId(null);
@@ -941,7 +938,7 @@ export default function Turbine3D({
   );
 
   const exploring = openPart !== null || selectedId !== null;
-  const panelOpen = exploring && !panelHidden;
+  const panelOpen = exploring;
   freeRef.current = {
     right: panelOpen && !compact ? 1 - 2 * PANEL_SHIFT : 1,
     bottom: panelOpen && compact ? 1 - 2 * PANEL_SHIFT_COMPACT : 1,
@@ -1032,7 +1029,7 @@ export default function Turbine3D({
           />
         </Canvas>
       </InteractionProvider>
-      {callouts && <CalloutLayer callouts={callouts} registry={calloutRegistry} hidden={exploring} />}
+      {callouts && <CalloutLayer callouts={callouts} registry={calloutRegistry} hidden={exploring} wide={!compact} />}
       {openPart && <SignalLayer groups={groups} registry={signalRegistry} compact={compact} />}
       <InfoPanel
         compact={compact}
@@ -1041,8 +1038,6 @@ export default function Turbine3D({
         onSelect={select}
         onGoTo={goTo}
         onClose={close}
-        hidden={panelHidden}
-        onToggleHidden={() => setPanelHidden((h) => !h)}
       />
     </div>
   );

@@ -1,40 +1,18 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import {
-  ArrowUp,
-  Compass,
-  HandCoins,
-  House,
-  Leaf,
-  Maximize,
-  Minimize,
-  RefreshCw,
-  RotateCw,
-  Wind,
-  Zap,
-  type LucideIcon,
-} from "lucide-react";
+import { Maximize, Minimize, RefreshCw, Wind } from "lucide-react";
 import dynamic from "next/dynamic";
-import { useMemo, useState, type ReactNode } from "react";
-import AnimatedNumber from "@/components/AnimatedNumber";
-import EquivalentsCycler from "@/components/EquivalentsCycler";
+import { useMemo, useState } from "react";
+import { buildCallouts } from "@/components/FloatingSigns";
 import MessageTicker from "@/components/MessageTicker";
 import MobileKiosk from "@/components/MobileKiosk";
-import MetricCard from "@/components/MetricCard";
-import PowerTrend from "@/components/PowerTrend";
 import SafeBoundary from "@/components/SafeBoundary";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useFullscreen, useIdleCursor, useKioskMaintenance, useNow } from "@/hooks/useKiosk";
 import { useLiveTurbine, useTurbineHistory } from "@/hooks/useTurbineData";
 import type { TurbineStatus } from "@/services/aceApi";
-import {
-  COMMUNITY_FUND_GBP_PER_KWH,
-  UK_HOUSEHOLD_KWH_PER_YEAR,
-  compassPoint,
-  computeCommunityMetrics,
-  describeWind,
-} from "@/utils/metrics";
+import { COMMUNITY_FUND_GBP_PER_KWH, computeCommunityMetrics } from "@/utils/metrics";
 import { formatUkDate, formatUkTime } from "@/utils/sun";
 
 const Turbine3D = dynamic(() => import("@/components/Turbine3D"), {
@@ -50,25 +28,10 @@ const STATUS_STYLE: Record<TurbineStatus, { text: string; dot: string; pill: str
   Paused: { text: "Paused for safety checks", dot: "bg-orange-400", pill: "bg-orange-500/20 ring-orange-400/40" },
 };
 
-const heading = "text-[clamp(1rem,2.4vh,1.9rem)] font-semibold text-white/85";
-
 function SceneMessage({ text }: { text: string }) {
   return (
     <div className="absolute inset-0 grid place-items-center bg-slate-900 text-[clamp(1.2rem,3vh,2.4rem)] font-semibold text-white/70">
       {text}
-    </div>
-  );
-}
-
-function TelemetryChip({ icon: Icon, label, value, sub }: { icon: LucideIcon; label: string; value: ReactNode; sub: ReactNode }) {
-  return (
-    <div className="rounded-2xl bg-slate-950/65 px-[2vh] py-[1.4vh] ring-1 ring-white/10 backdrop-blur">
-      <div className="flex items-center gap-2 text-[clamp(0.85rem,1.9vh,1.5rem)] text-white/70">
-        <Icon className="size-[2.4vh]" strokeWidth={2.4} />
-        {label}
-      </div>
-      <div className="text-[clamp(1.6rem,4.4vh,3.6rem)] font-bold leading-tight">{value}</div>
-      <div className="text-[clamp(0.85rem,1.9vh,1.5rem)] text-white/70">{sub}</div>
     </div>
   );
 }
@@ -92,8 +55,7 @@ export default function KioskPage() {
   const windSpeed = live?.windSpeedMs ?? 0;
   const rpm = live?.rotorSpeedRpm ?? 0;
   const windDirection = live?.windDirectionDeg ?? 225;
-  const wind = compassPoint(windDirection);
-  const dash = "—";
+  const callouts = useMemo(() => buildCallouts({ live, metrics, history, wide: true }), [live, metrics, history]);
 
   if (isMobile) {
     return (
@@ -157,192 +119,46 @@ export default function KioskPage() {
         </div>
       </header>
 
-      {/* Dual-zone body */}
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-[1.6vh] lg:grid-cols-[1.2fr_1fr]">
-        {/* Zone 1: 3D digital twin */}
-        <section className="relative min-h-[40vh] overflow-hidden rounded-3xl border border-white/10 bg-slate-900">
-          <SafeBoundary name="Turbine3D" fallback={<SceneMessage text="Restarting the 3D turbine…" />} retryAfterMs={20_000}>
-            <Turbine3D
-              className="absolute inset-0"
-              rotorSpeedRpm={rpm}
-              nacelleYawDeg={live?.nacelleYawDeg ?? windDirection}
-              windDirectionDeg={windDirection}
-              windSpeedMs={windSpeed}
-          powerKw={metrics.powerKw}
-              status={status}
-              hasData={ready}
-              snapshot={live}
-              onExploringChange={setExploring}
-            />
-          </SafeBoundary>
+      {/* The live 3D twin fills the screen; the community figures float around the turbine. */}
+      <section className="relative min-h-0 flex-1 overflow-hidden rounded-3xl border border-white/10 bg-slate-900">
+        <SafeBoundary name="Turbine3D" fallback={<SceneMessage text="Restarting the 3D turbine…" />} retryAfterMs={20_000}>
+          <Turbine3D
+            className="absolute inset-0"
+            callouts={callouts}
+            rotorSpeedRpm={rpm}
+            nacelleYawDeg={live?.nacelleYawDeg ?? windDirection}
+            windDirectionDeg={windDirection}
+            windSpeedMs={windSpeed}
+            powerKw={metrics.powerKw}
+            status={status}
+            hasData={ready}
+            snapshot={live}
+            onExploringChange={setExploring}
+          />
+        </SafeBoundary>
 
-          <div className="pointer-events-none absolute left-[2vh] top-[2vh] flex flex-col items-start gap-2">
-            <div className="rounded-2xl bg-slate-950/60 px-[2vh] py-[1vh] text-[clamp(0.9rem,2.1vh,1.6rem)] ring-1 ring-white/10 backdrop-blur">
-              <span className="font-bold text-emerald-300">Live 3D twin</span> · the blades turn at the real turbine&apos;s speed
-            </div>
-            {live?.scadaStale && (
-              <div className="rounded-2xl bg-amber-500/25 px-[2vh] py-[0.8vh] text-[clamp(0.8rem,1.8vh,1.4rem)] ring-1 ring-amber-400/40">
-                Showing the latest turbine reading from {formatUkTime(new Date(live.observedAt))}
-              </div>
-            )}
-          </div>
-
-          {connecting && (
-            <div className="pointer-events-none absolute inset-x-0 top-1/2 text-center text-[clamp(1.2rem,3vh,2.4rem)] font-semibold text-white/80">
-              Connecting to the ACE turbine…
+        <div
+          className={`pointer-events-none absolute bottom-[2vh] left-1/2 flex -translate-x-1/2 flex-col items-center gap-2 transition-opacity duration-500 ${
+            exploring ? "opacity-0" : "opacity-100"
+          }`}
+        >
+          {live?.scadaStale && (
+            <div className="rounded-2xl bg-amber-500/25 px-[2vh] py-[0.8vh] text-[clamp(0.8rem,1.8vh,1.4rem)] ring-1 ring-amber-400/40">
+              Showing the latest turbine reading from {formatUkTime(new Date(live.observedAt))}
             </div>
           )}
-
-          <div
-            className={`pointer-events-none absolute inset-x-[2vh] bottom-[2vh] grid grid-cols-3 gap-[1.4vh] transition-all duration-500 ${
-              exploring ? "translate-y-4 opacity-0" : "opacity-100"
-            }`}
-          >
-            <TelemetryChip
-              icon={Wind}
-              label="Wind speed"
-              value={ready ? <><AnimatedNumber value={windSpeed} decimals={1} /> <span className="text-[0.55em] text-white/70">m/s</span></> : dash}
-              sub={ready ? describeWind(windSpeed) : dash}
-            />
-            <TelemetryChip
-              icon={RotateCw}
-              label="Rotor speed"
-              value={ready ? <><AnimatedNumber value={rpm} decimals={1} /> <span className="text-[0.55em] text-white/70">rpm</span></> : dash}
-              sub={ready ? (rpm > 0.2 ? `One full turn every ${(60 / rpm).toFixed(1)} s` : "Blades at rest") : dash}
-            />
-            <TelemetryChip
-              icon={Compass}
-              label="Wind from the"
-              value={
-                ready ? (
-                  <span className="flex items-center gap-2">
-                    <motion.span
-                      className="inline-grid"
-                      animate={{ rotate: windDirection + 180 }}
-                      transition={{ type: "spring", stiffness: 30, damping: 12 }}
-                    >
-                      <ArrowUp className="size-[0.85em]" strokeWidth={3} />
-                    </motion.span>
-                    {wind.short}
-                  </span>
-                ) : (
-                  dash
-                )
-              }
-              sub={ready ? `Blowing in from the ${wind.long}` : dash}
-            />
+          <div className="whitespace-nowrap rounded-2xl bg-slate-950/60 px-[2vh] py-[1vh] text-[clamp(0.9rem,2.1vh,1.6rem)] ring-1 ring-white/10 backdrop-blur">
+            <span className="font-bold text-emerald-300">Live 3D twin</span> · the blades turn at the real turbine&apos;s speed · tap
+            the turbine to look inside
           </div>
-        </section>
+        </div>
 
-        {/* Zone 2: community value */}
-        <SafeBoundary name="Metrics" fallback={<div />} retryAfterMs={10_000}>
-          <section className="grid min-h-0 grid-rows-[auto_1fr] gap-[1.6vh]">
-            {/* Power hero + 24 h trend */}
-            <div className="grid grid-cols-[1fr_0.9fr] gap-[2vh] rounded-3xl border border-emerald-300/20 bg-gradient-to-br from-emerald-500/30 via-teal-500/15 to-transparent p-[2.2vh]">
-              <div className="flex min-w-0 flex-col justify-between">
-                <div className="flex items-center gap-3">
-                  <span className="grid size-[5vh] place-items-center rounded-2xl bg-emerald-400 text-slate-950">
-                    <Wind className="size-[3vh]" strokeWidth={2.4} />
-                  </span>
-                  <h2 className={heading}>Power right now</h2>
-                </div>
-                <div className="mt-[1vh] flex items-baseline gap-3">
-                  <span className="text-[clamp(3rem,10vh,8.5rem)] font-black leading-none tracking-tight">
-                    {ready ? <AnimatedNumber value={metrics.powerKw / 1000} decimals={2} /> : dash}
-                  </span>
-                  <span className="text-[clamp(1.5rem,4.5vh,3.6rem)] font-bold text-emerald-200">MW</span>
-                </div>
-                <div className="mt-[1.2vh] h-[1.6vh] overflow-hidden rounded-full bg-white/10">
-                  <motion.div
-                    className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-lime-300"
-                    initial={{ width: 0 }}
-                    animate={{ width: `${metrics.capacityShare * 100}%` }}
-                    transition={{ duration: 1.2, ease: "easeOut" }}
-                  />
-                </div>
-                <p className="mt-[0.8vh] text-[clamp(0.9rem,1.9vh,1.5rem)] text-white/70">
-                  {ready ? `${Math.round(metrics.capacityShare * 100)}% of its 4.2 MW maximum` : "Maximum 4.2 MW"}
-                </p>
-              </div>
-              <div className="flex min-h-[14vh] min-w-0 flex-col">
-                <div className="flex items-baseline justify-between gap-2">
-                  <h2 className="text-[clamp(0.9rem,2vh,1.6rem)] font-semibold text-white/80">Last 24 hours</h2>
-                  {metrics.energy24hKwh !== null && (
-                    <span className="text-[clamp(0.9rem,2vh,1.6rem)] font-bold text-emerald-200 tabular-nums">
-                      {(metrics.energy24hKwh / 1000).toFixed(1)} MWh
-                    </span>
-                  )}
-                </div>
-                <div className="min-h-0 flex-1">
-                  <PowerTrend history={history} />
-                </div>
-              </div>
-            </div>
-
-            {/* Community metric cards */}
-            <div className="grid min-h-0 grid-cols-2 grid-rows-2 gap-[1.6vh]">
-              <MetricCard
-                icon={House}
-                title="Homes powered right now"
-                accent="bg-amber-400 text-slate-950"
-                caption="average UK homes' worth of electricity"
-              >
-                {ready ? <AnimatedNumber value={metrics.homesPowered} /> : dash}
-              </MetricCard>
-
-              {metrics.fundGbpPerHour !== null ? (
-                <MetricCard
-                  icon={HandCoins}
-                  title="Raising for Lawrence Weston"
-                  accent="bg-pink-400 text-slate-950"
-                  caption={
-                    metrics.fundGbp24h !== null
-                      ? `About £${Math.round(metrics.fundGbp24h).toLocaleString("en-GB")} in the last 24 hours*`
-                      : "estimated community fund*"
-                  }
-                >
-                  {ready ? <AnimatedNumber value={metrics.fundGbpPerHour} decimals={2} prefix="£" /> : dash}
-                  <span className="text-[0.45em] font-bold text-white/70"> an hour</span>
-                </MetricCard>
-              ) : (
-                <MetricCard
-                  icon={Zap}
-                  title="Generated since switch-on"
-                  accent="bg-pink-400 text-slate-950"
-                  caption={
-                    metrics.lifetimeMwh !== null
-                      ? `enough for about ${Math.round((metrics.lifetimeMwh * 1000) / UK_HOUSEHOLD_KWH_PER_YEAR).toLocaleString("en-GB")} homes for a whole year`
-                      : "total clean electricity produced"
-                  }
-                >
-                  {ready && metrics.lifetimeMwh !== null ? (
-                    <AnimatedNumber value={metrics.lifetimeMwh / 1000} decimals={2} />
-                  ) : (
-                    dash
-                  )}
-                  <span className="text-[0.45em] font-bold text-white/70"> GWh</span>
-                </MetricCard>
-              )}
-
-              <MetricCard
-                icon={Leaf}
-                title="Carbon dioxide avoided"
-                accent="bg-lime-400 text-slate-950"
-                caption={
-                  metrics.co2Tonnes24h !== null
-                    ? `${metrics.co2Tonnes24h.toFixed(1)} tonnes saved in the last 24 hours`
-                    : "compared with the UK grid average"
-                }
-              >
-                {ready ? <AnimatedNumber value={metrics.co2KgPerHour} /> : dash}
-                <span className="text-[0.45em] font-bold text-white/70"> kg an hour</span>
-              </MetricCard>
-
-              <EquivalentsCycler equivalents={metrics.equivalents} ready={ready} />
-            </div>
-          </section>
-        </SafeBoundary>
-      </div>
+        {connecting && (
+          <div className="pointer-events-none absolute inset-x-0 top-1/2 text-center text-[clamp(1.2rem,3vh,2.4rem)] font-semibold text-white/80">
+            Connecting to the ACE turbine…
+          </div>
+        )}
+      </section>
 
       <MessageTicker />
 

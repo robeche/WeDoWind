@@ -39,6 +39,16 @@ const SLOT_CLASS: Record<CalloutSlot, string> = {
   br: "right-[3vw] top-[64%]",
 };
 
+/** Desktop / kiosk screen: bigger cards in two columns either side of the turbine. */
+const SLOT_CLASS_WIDE: Record<CalloutSlot, string> = {
+  tl: "left-[2.5%] top-[4%]",
+  tr: "right-[2.5%] top-[4%]",
+  ml: "left-[2.5%] top-[40%]",
+  mr: "right-[2.5%] top-[40%]",
+  bl: "left-[2.5%] bottom-[5%]",
+  br: "right-[2.5%] bottom-[5%]",
+};
+
 const FLOAT_DELAY: Record<CalloutSlot, string> = {
   tl: "0s",
   tr: "-1.5s",
@@ -52,11 +62,16 @@ export function CalloutLayer({
   callouts,
   registry,
   hidden,
+  wide = false,
 }: {
   callouts: CalloutSpec[];
   registry: React.RefObject<CalloutRegistry>;
   hidden: boolean;
+  /** Desktop / kiosk layout: larger cards, columns at the screen edges. */
+  wide?: boolean;
 }) {
+  const slots = wide ? SLOT_CLASS_WIDE : SLOT_CLASS;
+  const width = wide ? "w-[clamp(15rem,24vw,30rem)]" : "w-[min(35vw,10.5rem)]";
   const svgRef = useRef<SVGSVGElement>(null);
 
   const entry = (c: CalloutSpec): CalloutEntry => {
@@ -108,7 +123,7 @@ export function CalloutLayer({
             ref={(el) => {
               e.card = el;
             }}
-            className={`absolute w-[min(35vw,10.5rem)] ${SLOT_CLASS[c.slot]}`}
+            className={`absolute ${width} ${slots[c.slot]}`}
           >
             <div className="animate-float" style={{ animationDelay: FLOAT_DELAY[c.slot] }}>
               {c.content}

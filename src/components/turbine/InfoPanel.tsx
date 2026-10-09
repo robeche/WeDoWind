@@ -1,7 +1,7 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import { Hand, PanelRightClose, PanelRightOpen, X } from "lucide-react";
+import { Hand, X } from "lucide-react";
 import {
   EXTERIOR_PARTS,
   OPEN_CHILDREN,
@@ -20,9 +20,6 @@ interface Props {
   onSelect: (id: PartId) => void;
   onGoTo: (focus: Focus) => void;
   onClose: () => void;
-  /** The visitor folded the panel away: show only a small "Info" tab to bring it back. */
-  hidden?: boolean;
-  onToggleHidden?: () => void;
 }
 
 const CARD_BASE = "pointer-events-auto absolute overflow-y-auto bg-slate-950/80 text-white shadow-2xl ring-1 ring-white/15 backdrop-blur";
@@ -40,51 +37,11 @@ const OPEN_TITLE: Record<OpenableId, string> = {
 };
 
 /** HTML overlay describing the selected component; becomes a navigator while a part is open. */
-export default function InfoPanel({
-  compact = false,
-  selectedId,
-  openPart,
-  onSelect,
-  onGoTo,
-  onClose,
-  hidden = false,
-  onToggleHidden,
-}: Props) {
+export default function InfoPanel({ compact = false, selectedId, openPart, onSelect, onGoTo, onClose }: Props) {
   const info = selectedId ? PART_INFO[selectedId] : null;
   const card = compact ? CARD_SHEET : CARD_SIDE;
   const small = compact ? SMALL_SHEET : SMALL_SIDE;
   const slide = compact ? { initial: { opacity: 0, y: 40 }, exit: { opacity: 0, y: 40 } } : { initial: { opacity: 0, x: 30 }, exit: { opacity: 0, x: 30 } };
-  const iconBtn = `grid shrink-0 place-items-center rounded-2xl bg-white/10 ring-1 ring-white/15 hover:bg-white/20 ${compact ? "size-10" : "size-[5vh]"}`;
-  const icon = compact ? "size-5" : "size-[2.8vh]";
-  const hideButton = onToggleHidden && (
-    <button type="button" onClick={onToggleHidden} aria-label="Hide the information panel" className={iconBtn}>
-      <PanelRightClose className={icon} />
-    </button>
-  );
-
-  // Folded away: a small tab brings the panel back (closing still works from there).
-  if (hidden && (openPart || info)) {
-    const label = openPart ? PART_INFO[openPart].name : info!.name;
-    return (
-      <div
-        className={`pointer-events-auto absolute flex items-center gap-2 ${
-          compact ? "bottom-[max(0.75rem,env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2" : "right-[2vh] top-[8.5vh]"
-        }`}
-      >
-        <button
-          type="button"
-          onClick={onToggleHidden}
-          className={`${small} flex items-center gap-2 rounded-2xl bg-slate-950/80 px-3 py-[0.8vh] font-semibold text-white ring-1 ring-white/15 backdrop-blur hover:bg-slate-900`}
-        >
-          <PanelRightOpen className={compact ? "size-5" : "size-[2.6vh]"} />
-          {label} · info
-        </button>
-        <button type="button" onClick={onClose} aria-label="Close" className={`${iconBtn} bg-slate-950/80 backdrop-blur`}>
-          <X className={icon} />
-        </button>
-      </div>
-    );
-  }
 
   if (openPart) {
     const parentInfo = PART_INFO[openPart];
@@ -108,12 +65,14 @@ export default function InfoPanel({
                 {item ? item.name : OPEN_TITLE[openPart]}
               </h3>
             </div>
-            <div className="flex shrink-0 gap-2">
-              {hideButton}
-              <button type="button" onClick={onClose} aria-label={`Close the ${parentInfo.name.toLowerCase()}`} className={iconBtn}>
-                <X className={icon} />
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label={`Close the ${parentInfo.name.toLowerCase()}`}
+              className={`grid shrink-0 place-items-center rounded-2xl bg-white/10 ring-1 ring-white/15 hover:bg-white/20 ${compact ? "size-10" : "size-[5vh]"}`}
+            >
+              <X className={compact ? "size-5" : "size-[2.8vh]"} />
+            </button>
           </div>
 
           <p className={`${small} mt-[1vh] leading-snug text-white/80`}>{item ? item.description : parentInfo.intro}</p>
@@ -179,12 +138,14 @@ export default function InfoPanel({
         >
           <div className="flex items-start justify-between gap-3">
             <h3 className={compact ? "text-xl font-bold leading-tight" : "text-[clamp(1.3rem,3.2vh,2.4rem)] font-bold leading-tight"}>{info.name}</h3>
-            <div className="flex shrink-0 gap-2">
-              {hideButton}
-              <button type="button" onClick={onClose} aria-label="Close" className={iconBtn}>
-                <X className={icon} />
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close"
+              className={`grid shrink-0 place-items-center rounded-2xl bg-white/10 ring-1 ring-white/15 hover:bg-white/20 ${compact ? "size-10" : "size-[5vh]"}`}
+            >
+              <X className={compact ? "size-5" : "size-[2.8vh]"} />
+            </button>
           </div>
           <p className={`${small} mt-[1vh] leading-snug text-white/80`}>{info.description}</p>
           {info.id in EXTERIOR_PARTS && info.opens && (
