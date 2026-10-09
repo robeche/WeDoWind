@@ -31,6 +31,8 @@ import { NacelleInterior, YawSystem } from "./turbine/NacelleInterior";
 import { PART_INFO, TOWER_OPEN_FOCUS, type Focus, type OpenableId, type PartId } from "./turbine/parts";
 import TowerInterior from "./turbine/TowerInterior";
 import SiteSplat from "./turbine/SiteSplat";
+import { SignalLayer, SignalProjector, type FreeArea, type SignalRegistry } from "./turbine/SignalOverlay";
+import { signalGroups } from "./turbine/signals";
 import GridFlow from "./turbine/GridFlow";
 
 const CAMERA_TARGET: [number, number, number] = [0, 78, 0];
@@ -683,7 +685,7 @@ const CameraRig = memo(function CameraRig({
             width: size.width,
             height: size.height,
             fov: (camera as THREE.PerspectiveCamera).fov,
-            shift: focus ? (compactRef.current ? PANEL_SHIFT_COMPACT : PANEL_SHIFT) : 0,
+            shift: panelOpenRef.current ? (compactRef.current ? PANEL_SHIFT_COMPACT : PANEL_SHIFT) : 0,
             compact: compactRef.current,
           },
         )
@@ -895,6 +897,10 @@ export default function Turbine3D({
   const [selectedId, setSelectedId] = useState<PartId | null>(null);
   const [openPart, setOpenPart] = useState<OpenableId | null>(null);
   const [focus, setFocus] = useState<Focus | null>(null);
+  /** The visitor folded the info panel away (the view re-centres; the signal boxes stay). */
+  const [panelHidden, setPanelHidden] = useState(false);
+  const signalRegistry = useRef<SignalRegistry>(new Map());
+  const freeRef = useRef<FreeArea>({ right: 1, bottom: 1 });
   const workLightYRef = useRef(8);
   const yawRef = useRef(0);
   const lastInputRef = useRef(Date.now());
@@ -916,6 +922,7 @@ export default function Turbine3D({
   }, []);
 
   const close = useCallback(() => {
+    setPanelHidden(false);
     setOpenPart(null);
     setSelectedId(null);
     setHoveredId(null);
@@ -934,6 +941,17 @@ export default function Turbine3D({
   );
 
   const exploring = openPart !== null || selectedId !== null;
+  const panelOpen = exploring && !panelHidden;
+  freeRef.current = {
+    right: panelOpen && !compact ? 1 - 2 * PANEL_SHIFT : 1,
+    bottom: panelOpen && compact ? 1 - 2 * PANEL_SHIFT_COMPACT : 1,
+  };
+  // Live-signal boxes beside the components of the opened part.
+  const groups = openPart ? signalGroups(openPart, selectedId, props.snapshot ?? null) : [];
+  const resolveAnchor = useCallback(
+    (f: Focus, out: THREE.Vector3) => out.set(...resolveFocus(f, yawRef.current).target),
+    [],
+  );
   useEffect(() => {
     onExploringChange?.(exploring);
   }, [exploring, onExploringChange]);
@@ -1004,9 +1022,10 @@ export default function Turbine3D({
           <WindParticles liveRef={liveRef} />
           <HoverLabel />
           {callouts && <CalloutProjector registry={calloutRegistry} yawRef={yawRef} />}
+          {openPart && <SignalProjector registry={signalRegistry} freeRef={freeRef} resolve={resolveAnchor} />}
           <CameraRig
             focus={focus}
-            panelOpen={exploring}
+            panelOpen={panelOpen}
             clampToTower={openPart === "tower"}
             compact={compact}
             workLightYRef={workLightYRef}
@@ -1014,6 +1033,7 @@ export default function Turbine3D({
         </Canvas>
       </InteractionProvider>
       {callouts && <CalloutLayer callouts={callouts} registry={calloutRegistry} hidden={exploring} />}
+      {openPart && <SignalLayer groups={groups} registry={signalRegistry} compact={compact} />}
       <InfoPanel
         compact={compact}
         selectedId={selectedId}
@@ -1021,7 +1041,8 @@ export default function Turbine3D({
         onSelect={select}
         onGoTo={goTo}
         onClose={close}
-        snapshot={props.snapshot ?? null}
+        hidden={panelHidden}
+        onToggleHidden={() => setPanelHidden((h) => !h)}
       />
     </div>
   );

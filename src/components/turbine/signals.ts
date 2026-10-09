@@ -1,11 +1,11 @@
 /**
- * Live SCADA signals shown as tiles on the component panels while a part is open.
+ * Live SCADA signals shown in small boxes floating beside the components while a part is open.
  * Values come from the ACE open data API (CC-BY-4.0); any of them may be missing.
  */
 
 import type { LiveSnapshot, TemperatureId } from "@/services/aceApi";
-import { ROTOR_RADIUS } from "./dimensions";
-import type { OpenableId, PartId } from "./parts";
+import { NACELLE_STRETCH, ROTOR_RADIUS } from "./dimensions";
+import { PART_INFO, type Focus, type OpenableId, type PartId } from "./parts";
 
 export type SignalId =
   | "power"
@@ -80,102 +80,78 @@ const SPECS: Record<Exclude<SignalId, `temp:${string}`>, SignalSpec> = {
   operatingHours: { id: "operatingHours", label: "Operating hours", unit: "h", digits: 0, read: (s) => num(s.signals?.operatingHours) },
 };
 
-/** Tiles for each opened part, in display order. */
-export const PART_SIGNALS: Record<OpenableId, SignalSpec[]> = {
+/** Where a box points: a component (its focus target) or a named point in one of the scene frames. */
+type Anchor = PartId | { name: string; focus: Focus };
+
+interface SignalGroupSpec {
+  at: Anchor;
+  /** Box title; defaults to the component's name. */
+  title?: string;
+  signals: SignalSpec[];
+}
+
+/** Anemometer / wind vane on the rear of the nacelle roof (nacelle frame). */
+const ANEMOMETER: Anchor = { name: "Wind sensors", focus: { target: [0, 2.2, -3.4 - NACELLE_STRETCH / 2], distance: 0, elevationDeg: 0, frame: "nacelle" } };
+/** Blade tip of the inspected blade (blade frame). */
+const BLADE_TIP: Anchor = { name: "Blade tip", focus: { target: [0, ROTOR_RADIUS - 1.5, 0], distance: 0, elevationDeg: 0, frame: "blade" } };
+/** Air outside the tower door (world frame). */
+const OUTSIDE_BASE: Anchor = { name: "Outside", focus: { target: [0, 2.2, 4.2], distance: 0, elevationDeg: 0 } };
+
+/** One floating box per component, for each opened part. */
+export const PART_SIGNAL_GROUPS: Record<OpenableId, SignalGroupSpec[]> = {
   generator: [
-    SPECS.power,
-    SPECS.rotorSpeed,
-    SPECS.torque,
-    SPECS.reactivePower,
-    temp("genRotor1", "Rotor winding 1"),
-    temp("genRotor2", "Rotor winding 2"),
-    temp("frontBearing", "Front bearing"),
-    temp("rearBearing", "Rear bearing"),
-    temp("coolingWater", "Cooling water"),
+    { at: "stator", signals: [SPECS.power, SPECS.reactivePower, temp("coolingWater", "Cooling water")] },
+    {
+      at: "genRotor",
+      signals: [SPECS.rotorSpeed, SPECS.torque, temp("genRotor1", "Winding 1"), temp("genRotor2", "Winding 2")],
+    },
+    { at: "axle", title: "Main bearings", signals: [temp("frontBearing", "Front"), temp("rearBearing", "Rear")] },
   ],
   hub: [
-    SPECS.pitch,
-    SPECS.rotorSpeed,
-    SPECS.windSpeed,
-    temp("spinner", "Spinner"),
-    temp("pitchCabinetA", "Pitch cabinet A"),
-    temp("pitchCabinetB", "Pitch cabinet B"),
-    temp("pitchCabinetC", "Pitch cabinet C"),
+    { at: "pitchBearings", title: "Pitch", signals: [SPECS.pitch, SPECS.rotorSpeed] },
+    {
+      at: "bladeCabinets",
+      signals: [temp("pitchCabinetA", "Cabinet A"), temp("pitchCabinetB", "Cabinet B"), temp("pitchCabinetC", "Cabinet C")],
+    },
+    { at: "hubCabinet", title: "Spinner", signals: [temp("spinner", "Air inside")] },
   ],
   blades: [
-    SPECS.rotorSpeed,
-    SPECS.pitch,
-    SPECS.tipSpeed,
-    SPECS.windSpeed,
-    temp("bladeA", "Blade A"),
-    temp("bladeB", "Blade B"),
-    temp("bladeC", "Blade C"),
+    { at: "bladeRoot", signals: [SPECS.rotorSpeed, SPECS.pitch] },
+    { at: BLADE_TIP, signals: [SPECS.tipSpeed, SPECS.windSpeed] },
+    { at: "bladeShell", title: "Blade sensors", signals: [temp("bladeA", "Blade A"), temp("bladeB", "Blade B"), temp("bladeC", "Blade C")] },
   ],
   nacelle: [
-    SPECS.windSpeed,
-    SPECS.windFrom,
-    SPECS.heading,
-    SPECS.yawError,
-    temp("nacelle", "Nacelle air"),
-    temp("outsideHub", "Outside (hub)"),
-    temp("mainCarrier", "Main carrier"),
-    temp("nacelleCabinet", "Control cabinet"),
-    temp("coolingWater", "Cooling water"),
-    temp("fanInverter", "Fan inverter"),
-    temp("yawInverter", "Yaw inverter"),
+    { at: ANEMOMETER, signals: [SPECS.windSpeed, SPECS.windFrom, SPECS.yawError, temp("outsideHub", "Outside")] },
+    { at: "yawDrives", signals: [SPECS.heading, temp("yawInverter", "Yaw inverter")] },
+    { at: "mainCarrier", signals: [temp("mainCarrier", "Main carrier"), temp("nacelle", "Nacelle air")] },
+    { at: "nacelleCabinets", signals: [temp("nacelleCabinet", "Cabinet")] },
+    { at: "cooling", signals: [temp("coolingWater", "Cooling water"), temp("fanInverter", "Fan inverter")] },
   ],
   tower: [
-    SPECS.power,
-    SPECS.reactivePower,
-    SPECS.voltage,
-    SPECS.current,
-    SPECS.frequency,
-    SPECS.powerFactor,
-    temp("transformer", "Transformer"),
-    temp("inverterMax", "Hottest inverter"),
-    temp("controlCabinet", "Control cabinet"),
-    temp("tower", "Tower air"),
-    temp("outsideGround", "Outside (ground)"),
-    SPECS.operatingHours,
+    { at: "converter", signals: [SPECS.power, SPECS.reactivePower, temp("inverterMax", "Hottest inverter")] },
+    { at: "transformer", signals: [temp("transformer", "Temperature"), SPECS.voltage, SPECS.current] },
+    { at: "switchgear", title: "Grid connection", signals: [SPECS.frequency, SPECS.powerFactor] },
+    { at: "controlCabinet", signals: [temp("controlCabinet", "Temperature"), SPECS.operatingHours] },
+    { at: "platforms", title: "Inside the tower", signals: [temp("tower", "Air")] },
+    { at: OUTSIDE_BASE, signals: [temp("outsideGround", "Air")] },
   ],
 };
 
-/** Signals that belong to a specific inner component: highlighted (and listed first) when it is selected. */
-export const PART_FOCUS_SIGNALS: Partial<Record<PartId, SignalId[]>> = {
-  // Generator
-  stator: ["power", "temp:coolingWater", "reactivePower"],
-  genRotor: ["rotorSpeed", "torque", "temp:genRotor1", "temp:genRotor2"],
-  airGap: ["torque", "power"],
-  excitation: ["temp:genRotor1", "temp:genRotor2"],
-  axle: ["temp:frontBearing", "temp:rearBearing", "rotorSpeed"],
-  // Hub
-  pitchBearings: ["pitch"],
-  pitchMotors: ["pitch", "rotorSpeed"],
-  bladeCabinets: ["temp:pitchCabinetA", "temp:pitchCabinetB", "temp:pitchCabinetC"],
-  hubCabinet: ["temp:spinner", "pitch"],
-  // Blades
-  bladeRoot: ["pitch"],
-  leadingEdge: ["tipSpeed"],
-  sparCaps: ["rotorSpeed", "tipSpeed"],
-  // Nacelle
-  yawDrives: ["heading", "yawError", "windFrom", "temp:yawInverter"],
-  nacelleCabinets: ["temp:nacelleCabinet"],
-  cooling: ["temp:coolingWater", "temp:fanInverter", "temp:nacelle"],
-  mainCarrier: ["temp:mainCarrier"],
-  // Tower
-  transformer: ["temp:transformer", "voltage", "power"],
-  converter: ["temp:inverterMax", "current", "power", "reactivePower"],
-  controlCabinet: ["temp:controlCabinet", "operatingHours"],
-  switchgear: ["voltage", "current", "frequency"],
-  cables: ["current", "power"],
-};
-
-export interface SignalTile {
+export interface SignalRow {
   id: SignalId;
   label: string;
   value: string;
   unit: string;
+}
+
+export interface SignalGroup {
+  key: string;
+  title: string;
+  /** Point the box's leader line ends at (same frame conventions as a camera focus). */
+  focus: Focus;
+  /** The selected component's own box. */
   highlight: boolean;
+  rows: SignalRow[];
 }
 
 function format(spec: SignalSpec, v: number): { value: string; unit: string } {
@@ -184,15 +160,30 @@ function format(spec: SignalSpec, v: number): { value: string; unit: string } {
   return { value: v.toLocaleString("en-GB", { minimumFractionDigits: spec.digits, maximumFractionDigits: spec.digits }), unit: spec.unit };
 }
 
-/** Tiles for the open part; the selected component's own signals are highlighted and moved to the front. */
-export function signalTiles(openPart: OpenableId, selectedId: PartId | null, snapshot: LiveSnapshot | null): SignalTile[] {
-  const focus = new Set(selectedId ? (PART_FOCUS_SIGNALS[selectedId] ?? []) : []);
-  const tiles: SignalTile[] = [];
-  for (const spec of PART_SIGNALS[openPart]) {
-    const v = snapshot ? spec.read(snapshot) : null;
-    if (v === null && spec.optional && snapshot) continue;
-    const f = v === null ? { value: "—", unit: "" } : format(spec, v);
-    tiles.push({ id: spec.id, label: spec.label, ...f, highlight: focus.has(spec.id) });
+/**
+ * Floating boxes for the open part: one per component, listing its live signals. Optional
+ * sensors with no (plausible) reading are left out, and a box with nothing left is dropped.
+ */
+export function signalGroups(openPart: OpenableId, selectedId: PartId | null, snapshot: LiveSnapshot | null): SignalGroup[] {
+  const groups: SignalGroup[] = [];
+  for (const g of PART_SIGNAL_GROUPS[openPart]) {
+    const rows: SignalRow[] = [];
+    for (const spec of g.signals) {
+      const v = snapshot ? spec.read(snapshot) : null;
+      if (v === null && spec.optional && snapshot) continue;
+      rows.push({ id: spec.id, label: spec.label, ...(v === null ? { value: "—", unit: "" } : format(spec, v)) });
+    }
+    if (!rows.length) continue;
+    const isPart = typeof g.at === "string";
+    const focus = isPart ? PART_INFO[g.at as PartId].focus : (g.at as { focus: Focus }).focus;
+    if (!focus) continue;
+    groups.push({
+      key: isPart ? (g.at as string) : (g.at as { name: string }).name,
+      title: g.title ?? (isPart ? PART_INFO[g.at as PartId].name : (g.at as { name: string }).name),
+      focus,
+      highlight: isPart && selectedId === g.at,
+      rows,
+    });
   }
-  return [...tiles.filter((t) => t.highlight), ...tiles.filter((t) => !t.highlight)];
+  return groups;
 }

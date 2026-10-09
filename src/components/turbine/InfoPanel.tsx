@@ -1,8 +1,7 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import { Hand, X } from "lucide-react";
-import type { LiveSnapshot } from "@/services/aceApi";
+import { Hand, PanelRightClose, PanelRightOpen, X } from "lucide-react";
 import {
   EXTERIOR_PARTS,
   OPEN_CHILDREN,
@@ -12,7 +11,6 @@ import {
   type OpenableId,
   type PartId,
 } from "./parts";
-import { signalTiles } from "./signals";
 
 interface Props {
   /** Phone layout: the panel becomes a bottom sheet. */
@@ -22,8 +20,9 @@ interface Props {
   onSelect: (id: PartId) => void;
   onGoTo: (focus: Focus) => void;
   onClose: () => void;
-  /** Latest live data, for the signal tiles shown while a part is open. */
-  snapshot?: LiveSnapshot | null;
+  /** The visitor folded the panel away: show only a small "Info" tab to bring it back. */
+  hidden?: boolean;
+  onToggleHidden?: () => void;
 }
 
 const CARD_BASE = "pointer-events-auto absolute overflow-y-auto bg-slate-950/80 text-white shadow-2xl ring-1 ring-white/15 backdrop-blur";
@@ -41,56 +40,51 @@ const OPEN_TITLE: Record<OpenableId, string> = {
 };
 
 /** HTML overlay describing the selected component; becomes a navigator while a part is open. */
-/** Live SCADA tiles for the opened part; the selected component's own signals are highlighted. */
-function SignalGrid({
-  openPart,
+export default function InfoPanel({
+  compact = false,
   selectedId,
-  snapshot,
-  compact,
-  small,
-}: {
-  openPart: OpenableId;
-  selectedId: PartId | null;
-  snapshot: LiveSnapshot | null;
-  compact: boolean;
-  small: string;
-}) {
-  const tiles = signalTiles(openPart, selectedId, snapshot);
-  const stale = !snapshot || snapshot.scadaStale;
-  return (
-    <section className="mt-[1.6vh]" aria-label="Live signals">
-      <div className={`${small} flex items-center gap-2 font-semibold text-white/60`}>
-        <span className={`size-2 rounded-full ${stale ? "bg-amber-400" : "animate-pulse bg-emerald-400"}`} />
-        {stale ? "Latest data" : "Live data"}
-      </div>
-      <div className={`mt-[0.6vh] grid gap-[0.7vh] ${compact ? "grid-cols-2" : "grid-cols-3"}`}>
-        {tiles.map((t) => (
-          <div
-            key={t.id}
-            className={`rounded-xl px-2.5 py-[0.7vh] ring-1 transition-colors ${
-              t.highlight ? "bg-emerald-400/15 ring-emerald-300/70" : "bg-white/[0.06] ring-white/10"
-            }`}
-          >
-            <div className={`truncate text-white/60 ${compact ? "text-[0.7rem]" : "text-[clamp(0.65rem,1.35vh,1rem)]"}`}>{t.label}</div>
-            <div className={`font-bold tabular-nums leading-tight ${compact ? "text-base" : "text-[clamp(0.95rem,2vh,1.5rem)]"}`}>
-              {t.value}
-              {t.unit && <span className="ml-1 text-[0.7em] font-semibold text-white/60">{t.unit}</span>}
-            </div>
-          </div>
-        ))}
-      </div>
-      <p className={`mt-[0.6vh] text-white/40 ${compact ? "text-[0.65rem]" : "text-[clamp(0.6rem,1.2vh,0.9rem)]"}`}>
-        Turbine SCADA via ACE open data (CC-BY-4.0). Temperatures are 1-minute means; missing sensors are hidden.
-      </p>
-    </section>
-  );
-}
-
-export default function InfoPanel({ compact = false, selectedId, openPart, onSelect, onGoTo, onClose, snapshot = null }: Props) {
+  openPart,
+  onSelect,
+  onGoTo,
+  onClose,
+  hidden = false,
+  onToggleHidden,
+}: Props) {
   const info = selectedId ? PART_INFO[selectedId] : null;
   const card = compact ? CARD_SHEET : CARD_SIDE;
   const small = compact ? SMALL_SHEET : SMALL_SIDE;
   const slide = compact ? { initial: { opacity: 0, y: 40 }, exit: { opacity: 0, y: 40 } } : { initial: { opacity: 0, x: 30 }, exit: { opacity: 0, x: 30 } };
+  const iconBtn = `grid shrink-0 place-items-center rounded-2xl bg-white/10 ring-1 ring-white/15 hover:bg-white/20 ${compact ? "size-10" : "size-[5vh]"}`;
+  const icon = compact ? "size-5" : "size-[2.8vh]";
+  const hideButton = onToggleHidden && (
+    <button type="button" onClick={onToggleHidden} aria-label="Hide the information panel" className={iconBtn}>
+      <PanelRightClose className={icon} />
+    </button>
+  );
+
+  // Folded away: a small tab brings the panel back (closing still works from there).
+  if (hidden && (openPart || info)) {
+    const label = openPart ? PART_INFO[openPart].name : info!.name;
+    return (
+      <div
+        className={`pointer-events-auto absolute flex items-center gap-2 ${
+          compact ? "bottom-[max(0.75rem,env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2" : "right-[2vh] top-[8.5vh]"
+        }`}
+      >
+        <button
+          type="button"
+          onClick={onToggleHidden}
+          className={`${small} flex items-center gap-2 rounded-2xl bg-slate-950/80 px-3 py-[0.8vh] font-semibold text-white ring-1 ring-white/15 backdrop-blur hover:bg-slate-900`}
+        >
+          <PanelRightOpen className={compact ? "size-5" : "size-[2.6vh]"} />
+          {label} · info
+        </button>
+        <button type="button" onClick={onClose} aria-label="Close" className={`${iconBtn} bg-slate-950/80 backdrop-blur`}>
+          <X className={icon} />
+        </button>
+      </div>
+    );
+  }
 
   if (openPart) {
     const parentInfo = PART_INFO[openPart];
@@ -114,19 +108,15 @@ export default function InfoPanel({ compact = false, selectedId, openPart, onSel
                 {item ? item.name : OPEN_TITLE[openPart]}
               </h3>
             </div>
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label={`Close the ${parentInfo.name.toLowerCase()}`}
-              className={`grid shrink-0 place-items-center rounded-2xl bg-white/10 ring-1 ring-white/15 hover:bg-white/20 ${compact ? "size-10" : "size-[5vh]"}`}
-            >
-              <X className={compact ? "size-5" : "size-[2.8vh]"} />
-            </button>
+            <div className="flex shrink-0 gap-2">
+              {hideButton}
+              <button type="button" onClick={onClose} aria-label={`Close the ${parentInfo.name.toLowerCase()}`} className={iconBtn}>
+                <X className={icon} />
+              </button>
+            </div>
           </div>
 
           <p className={`${small} mt-[1vh] leading-snug text-white/80`}>{item ? item.description : parentInfo.intro}</p>
-
-          <SignalGrid openPart={openPart} selectedId={selectedId} snapshot={snapshot} compact={compact} small={small} />
 
           <div className="mt-[1.6vh] grid grid-cols-2 gap-[0.8vh]">
             {OPEN_CHILDREN[openPart].map((id) => (
@@ -189,14 +179,12 @@ export default function InfoPanel({ compact = false, selectedId, openPart, onSel
         >
           <div className="flex items-start justify-between gap-3">
             <h3 className={compact ? "text-xl font-bold leading-tight" : "text-[clamp(1.3rem,3.2vh,2.4rem)] font-bold leading-tight"}>{info.name}</h3>
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label="Close"
-              className={`grid shrink-0 place-items-center rounded-2xl bg-white/10 ring-1 ring-white/15 hover:bg-white/20 ${compact ? "size-10" : "size-[5vh]"}`}
-            >
-              <X className={compact ? "size-5" : "size-[2.8vh]"} />
-            </button>
+            <div className="flex shrink-0 gap-2">
+              {hideButton}
+              <button type="button" onClick={onClose} aria-label="Close" className={iconBtn}>
+                <X className={icon} />
+              </button>
+            </div>
           </div>
           <p className={`${small} mt-[1vh] leading-snug text-white/80`}>{info.description}</p>
           {info.id in EXTERIOR_PARTS && info.opens && (
