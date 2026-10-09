@@ -158,7 +158,8 @@ export default function InfoPanel({ compact = false, selectedId, openPart, onSel
             </button>
           )}
         </motion.aside>
-      ) : (
+      ) : compact ? (
+        // Desktop: the page's own note already invites visitors to tap the turbine.
         <motion.div
           key="hint"
           className={`pointer-events-none absolute flex items-center gap-2 rounded-2xl bg-slate-950/60 ring-1 ring-white/10 backdrop-blur ${small} ${
@@ -171,7 +172,7 @@ export default function InfoPanel({ compact = false, selectedId, openPart, onSel
           <Hand className="size-[2.4vh] text-sky-300" />
           Tap the turbine to explore
         </motion.div>
-      )}
+      ) : null}
     </AnimatePresence>
   );
 }

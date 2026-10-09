@@ -3,12 +3,13 @@
  * Values come from the ACE open data API (CC-BY-4.0); any of them may be missing.
  */
 
-import type { LiveSnapshot, TemperatureId } from "@/services/aceApi";
-import { NACELLE_STRETCH, ROTOR_RADIUS } from "./dimensions";
+import { RATED_POWER_KW, type LiveSnapshot, type TemperatureId } from "@/services/aceApi";
+import { NACELLE_STRETCH, ROTOR_RADIUS, ROTOR_Z } from "./dimensions";
 import { PART_INFO, type Focus, type OpenableId, type PartId } from "./parts";
 
 export type SignalId =
   | "power"
+  | "capacity"
   | "rotorSpeed"
   | "torque"
   | "tipSpeed"
@@ -51,6 +52,13 @@ const temp = (id: TemperatureId, label: string): SignalSpec => ({
 
 const SPECS: Record<Exclude<SignalId, `temp:${string}`>, SignalSpec> = {
   power: { id: "power", label: "Power", unit: "kW", digits: 0, read: (s) => s.activePowerKw },
+  capacity: {
+    id: "capacity",
+    label: "Of its 4.2 MW maximum",
+    unit: "%",
+    digits: 0,
+    read: (s) => Math.min(100, (s.activePowerKw / RATED_POWER_KW) * 100),
+  },
   rotorSpeed: { id: "rotorSpeed", label: "Rotor speed", unit: "rpm", digits: 1, read: (s) => s.rotorSpeedRpm },
   torque: {
     id: "torque",
@@ -96,6 +104,20 @@ const ANEMOMETER: Anchor = { name: "Wind sensors", focus: { target: [0, 2.2, -3.
 const BLADE_TIP: Anchor = { name: "Blade tip", focus: { target: [0, ROTOR_RADIUS - 1.5, 0], distance: 0, elevationDeg: 0, frame: "blade" } };
 /** Air outside the tower door (world frame). */
 const OUTSIDE_BASE: Anchor = { name: "Outside", focus: { target: [0, 2.2, 4.2], distance: 0, elevationDeg: 0 } };
+
+/** Points on the whole turbine for the overview boxes (nacelle frame, spread out so they read apart). */
+const nacellePoint = (name: string, target: [number, number, number]): Anchor => ({
+  name,
+  focus: { target, distance: 0, elevationDeg: 0, frame: "nacelle" },
+});
+
+/** Boxes on the turbine while nobody is exploring: the headline machine signals. */
+const OVERVIEW_GROUPS: SignalGroupSpec[] = [
+  { at: nacellePoint("Rotor", [0, 0, ROTOR_Z + 2.8]), signals: [SPECS.rotorSpeed] },
+  { at: nacellePoint("Blade pitch", [0, 30, ROTOR_Z]), signals: [SPECS.pitch] },
+  { at: nacellePoint("Generator", [0, 3.2, ROTOR_Z - 1.8]), signals: [SPECS.power, SPECS.capacity] },
+  { at: nacellePoint("Nacelle direction", [0, 1.6, -3.5 - NACELLE_STRETCH]), signals: [SPECS.heading, SPECS.yawError] },
+];
 
 /** One floating box per component, for each opened part. */
 export const PART_SIGNAL_GROUPS: Record<OpenableId, SignalGroupSpec[]> = {
@@ -165,8 +187,17 @@ function format(spec: SignalSpec, v: number): { value: string; unit: string } {
  * sensors with no (plausible) reading are left out, and a box with nothing left is dropped.
  */
 export function signalGroups(openPart: OpenableId, selectedId: PartId | null, snapshot: LiveSnapshot | null): SignalGroup[] {
+  return buildGroups(PART_SIGNAL_GROUPS[openPart], selectedId, snapshot);
+}
+
+/** Overview boxes on the turbine (rotor speed, pitch, power, nacelle direction). */
+export function overviewSignalGroups(snapshot: LiveSnapshot | null): SignalGroup[] {
+  return buildGroups(OVERVIEW_GROUPS, null, snapshot);
+}
+
+function buildGroups(specs: SignalGroupSpec[], selectedId: PartId | null, snapshot: LiveSnapshot | null): SignalGroup[] {
   const groups: SignalGroup[] = [];
-  for (const g of PART_SIGNAL_GROUPS[openPart]) {
+  for (const g of specs) {
     const rows: SignalRow[] = [];
     for (const spec of g.signals) {
       const v = snapshot ? spec.read(snapshot) : null;

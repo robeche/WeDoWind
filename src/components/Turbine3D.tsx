@@ -32,7 +32,7 @@ import { PART_INFO, TOWER_OPEN_FOCUS, type Focus, type OpenableId, type PartId }
 import TowerInterior from "./turbine/TowerInterior";
 import SiteSplat from "./turbine/SiteSplat";
 import { SignalLayer, SignalProjector, type FreeArea, type SignalRegistry } from "./turbine/SignalOverlay";
-import { signalGroups } from "./turbine/signals";
+import { overviewSignalGroups, signalGroups } from "./turbine/signals";
 import GridFlow from "./turbine/GridFlow";
 
 const CAMERA_TARGET: [number, number, number] = [0, 78, 0];
@@ -824,6 +824,15 @@ function resolveFocus(f: Focus, yaw: number): Focus {
 /* Floating signs: project turbine anchor points to the screen          */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Where the overhead lines leaving Seabank end, towards Bristol (south-east of the site; scene
+ * frame: +X east, +Z south). A little above the last pylons.
+ */
+const BRISTOL_ANCHOR = new THREE.Vector3(1290, 70, 1150);
+/** Gap (px) between an attached card and its anchor, and from the screen edge. */
+const ATTACHED_GAP = 18;
+const EDGE_MARGIN = 12;
+
 function anchorWorld(id: AnchorId, yaw: number, out: THREE.Vector3) {
   switch (id) {
     case "hub":
@@ -840,6 +849,8 @@ function anchorWorld(id: AnchorId, yaw: number, out: THREE.Vector3) {
       return out.set(0, 22, 0);
     case "base":
       return out.set(0, 3, 0);
+    case "bristol":
+      return out.copy(BRISTOL_ANCHOR);
   }
 }
 
@@ -853,13 +864,73 @@ function CalloutProjector({
   const v = useMemo(() => new THREE.Vector3(), []);
   useFrame(({ camera, size }) => {
     registry.current.forEach((e) => {
-      if (!e.line || !e.dot || !e.card) return;
-      anchorWorld(e.anchor, yawRef.current, v).project(camera);
-      const visible = v.z < 1 && Math.abs(v.x) < 1.2 && Math.abs(v.y) < 1.2;
+      const c = e.card;
+      if (!c || !e.anchor) return; // sky cards: nothing to follow
+      anchorWorld(e.anchor, yawRef.current, v);
+      // Camera-space position first: tells "behind the camera" apart from "off to one side".
+      const cam = v.clone().applyMatrix4(camera.matrixWorldInverse);
+      v.project(camera);
+      const inFront = cam.z < 0;
+      const visible = inFront && v.z < 1 && Math.abs(v.x) < 1.2 && Math.abs(v.y) < 1.2;
       const ax = ((v.x + 1) / 2) * size.width;
       const ay = ((1 - v.y) / 2) * size.height;
+
+      if (e.attached) {
+        // The card sits just above its anchor; off screen it waits at the edge on that side.
+        const w = c.offsetWidth;
+        const h = c.offsetHeight;
+        let tx = ax - w / 2;
+        let ty = ay - h - ATTACHED_GAP;
+        const onScreen = inFront && ax >= 0 && ax <= size.width && ay >= 0 && ay <= size.height;
+        if (!onScreen) {
+          // Direction to the anchor in the screen plane (camera space x right, y up).
+          const dx = cam.x;
+          const dy = -cam.y;
+          const k = Math.max(Math.abs(dx) / (size.width / 2), Math.abs(dy) / (size.height / 2), 1e-6);
+          tx = size.width / 2 + dx / k - w / 2;
+          ty = size.height / 2 + dy / k - h / 2;
+        }
+        tx = THREE.MathUtils.clamp(tx, EDGE_MARGIN, size.width - w - EDGE_MARGIN);
+        ty = THREE.MathUtils.clamp(ty, EDGE_MARGIN, size.height - h - EDGE_MARGIN);
+        // Step aside (vertically) from the cards fixed in screen slots.
+        registry.current.forEach((o) => {
+          if (o === e || o.attached || !o.card) return;
+          const r = o.card;
+          const ox = Math.min(tx + w, r.offsetLeft + r.offsetWidth) - Math.max(tx, r.offsetLeft);
+          const oy = Math.min(ty + h, r.offsetTop + r.offsetHeight) - Math.max(ty, r.offsetTop);
+          if (ox <= -EDGE_MARGIN || oy <= -EDGE_MARGIN) return;
+          const up = r.offsetTop - h - EDGE_MARGIN;
+          const down = r.offsetTop + r.offsetHeight + EDGE_MARGIN;
+          const fitsUp = up >= EDGE_MARGIN;
+          const fitsDown = down + h <= size.height - EDGE_MARGIN;
+          ty = fitsUp && (!fitsDown || ty - up < down - ty) ? up : fitsDown ? down : ty;
+        });
+        if (!e.placed) {
+          e.x = tx;
+          e.y = ty;
+          e.placed = true;
+        } else {
+          e.x += (tx - e.x) * 0.15;
+          e.y += (ty - e.y) * 0.15;
+        }
+        c.style.transform = `translate(${e.x.toFixed(1)}px, ${e.y.toFixed(1)}px)`;
+        c.style.visibility = "visible";
+        if (e.line && e.dot) {
+          const show = onScreen ? "visible" : "hidden";
+          e.line.setAttribute("x1", String(e.x + w / 2));
+          e.line.setAttribute("y1", String(e.y + h));
+          e.line.setAttribute("x2", String(ax));
+          e.line.setAttribute("y2", String(ay));
+          e.dot.setAttribute("cx", String(ax));
+          e.dot.setAttribute("cy", String(ay));
+          e.line.style.visibility = show;
+          e.dot.style.visibility = show;
+        }
+        return;
+      }
+
+      if (!e.line || !e.dot) return;
       // Attach to the card's inner edge, vertically centred.
-      const c = e.card;
       const cx = e.side === "left" ? c.offsetLeft + c.offsetWidth : c.offsetLeft;
       const cy = c.offsetTop + c.offsetHeight / 2;
       e.line.setAttribute("x1", String(cx));
@@ -943,8 +1014,13 @@ export default function Turbine3D({
     right: panelOpen && !compact ? 1 - 2 * PANEL_SHIFT : 1,
     bottom: panelOpen && compact ? 1 - 2 * PANEL_SHIFT_COMPACT : 1,
   };
-  // Live-signal boxes beside the components of the opened part.
-  const groups = openPart ? signalGroups(openPart, selectedId, props.snapshot ?? null) : [];
+  // Live-signal boxes: beside the components of the opened part, or on the turbine in the overview.
+  const snapshot = props.snapshot ?? null;
+  const groups = openPart
+    ? signalGroups(openPart, selectedId, snapshot)
+    : exploring
+      ? []
+      : overviewSignalGroups(snapshot);
   const resolveAnchor = useCallback(
     (f: Focus, out: THREE.Vector3) => out.set(...resolveFocus(f, yawRef.current).target),
     [],
@@ -1019,7 +1095,7 @@ export default function Turbine3D({
           <WindParticles liveRef={liveRef} />
           <HoverLabel />
           {callouts && <CalloutProjector registry={calloutRegistry} yawRef={yawRef} />}
-          {openPart && <SignalProjector registry={signalRegistry} freeRef={freeRef} resolve={resolveAnchor} />}
+          <SignalProjector registry={signalRegistry} freeRef={freeRef} resolve={resolveAnchor} />
           <CameraRig
             focus={focus}
             panelOpen={panelOpen}
@@ -1030,7 +1106,7 @@ export default function Turbine3D({
         </Canvas>
       </InteractionProvider>
       {callouts && <CalloutLayer callouts={callouts} registry={calloutRegistry} hidden={exploring} wide={!compact} />}
-      {openPart && <SignalLayer groups={groups} registry={signalRegistry} compact={compact} />}
+      <SignalLayer groups={groups} registry={signalRegistry} compact={compact} />
       <InfoPanel
         compact={compact}
         selectedId={selectedId}

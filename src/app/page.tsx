@@ -55,7 +55,7 @@ export default function KioskPage() {
   const windSpeed = live?.windSpeedMs ?? 0;
   const rpm = live?.rotorSpeedRpm ?? 0;
   const windDirection = live?.windDirectionDeg ?? 225;
-  const callouts = useMemo(() => buildCallouts({ live, metrics, history, wide: true }), [live, metrics, history]);
+  const callouts = useMemo(() => buildCallouts({ live, metrics, wide: true }), [live, metrics]);
 
   if (isMobile) {
     return (

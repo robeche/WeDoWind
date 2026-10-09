@@ -8,23 +8,36 @@
 
 import { useRef, type ReactNode } from "react";
 
-/** Points on the turbine a card can point at (resolved to world space each frame). */
-export type AnchorId = "hub" | "rotorTop" | "nacelle" | "towerUpper" | "towerMid" | "towerLow" | "base";
+/** Points in the scene a card can point at (resolved to world space each frame). */
+export type AnchorId = "hub" | "rotorTop" | "nacelle" | "towerUpper" | "towerMid" | "towerLow" | "base" | "bristol";
 export type CalloutSlot = "tl" | "tr" | "ml" | "mr" | "bl" | "br";
 
+/**
+ * A floating card. Three kinds:
+ * - `slot` + `anchor`: card in a screen slot, leader line to the anchor;
+ * - `slot` only: card floating in a screen slot (e.g. in the sky), no line;
+ * - `anchor` only: card sitting just above its anchor in the 3D scene and following it; when the
+ *   anchor is off screen the card waits at the screen edge on its side.
+ */
 export interface CalloutSpec {
   id: string;
-  slot: CalloutSlot;
-  anchor: AnchorId;
+  slot?: CalloutSlot;
+  anchor?: AnchorId;
   content: ReactNode;
 }
 
 export interface CalloutEntry {
-  anchor: AnchorId;
+  anchor: AnchorId | null;
+  /** Card follows its anchor in the scene (no slot). */
+  attached: boolean;
   side: "left" | "right";
   card: HTMLDivElement | null;
   line: SVGLineElement | null;
   dot: SVGCircleElement | null;
+  /** Attached cards: current top-left position (px), smoothed. */
+  x: number;
+  y: number;
+  placed: boolean;
 }
 
 /** Shared between the HTML layer and the in-canvas projector. */
@@ -77,10 +90,21 @@ export function CalloutLayer({
   const entry = (c: CalloutSpec): CalloutEntry => {
     let e = registry.current.get(c.id);
     if (!e) {
-      e = { anchor: c.anchor, side: c.slot.endsWith("l") ? "left" : "right", card: null, line: null, dot: null };
+      e = {
+        anchor: c.anchor ?? null,
+        attached: !c.slot,
+        side: c.slot?.endsWith("l") ? "left" : "right",
+        card: null,
+        line: null,
+        dot: null,
+        x: 0,
+        y: 0,
+        placed: false,
+      };
       registry.current.set(c.id, e);
     }
-    e.anchor = c.anchor;
+    e.anchor = c.anchor ?? null;
+    e.attached = !c.slot;
     return e;
   };
 
@@ -90,7 +114,7 @@ export function CalloutLayer({
       aria-hidden={hidden}
     >
       <svg ref={svgRef} className="absolute inset-0 size-full overflow-visible">
-        {callouts.map((c) => {
+        {callouts.filter((c) => c.anchor).map((c) => {
           const e = entry(c);
           return (
             <g key={c.id}>
@@ -123,9 +147,10 @@ export function CalloutLayer({
             ref={(el) => {
               e.card = el;
             }}
-            className={`absolute ${width} ${slots[c.slot]}`}
+            className={`absolute ${width} ${c.slot ? slots[c.slot] : "left-0 top-0"}`}
+            style={c.slot ? undefined : { visibility: "hidden" }}
           >
-            <div className="animate-float" style={{ animationDelay: FLOAT_DELAY[c.slot] }}>
+            <div className="animate-float" style={{ animationDelay: c.slot ? FLOAT_DELAY[c.slot] : "-3.7s" }}>
               {c.content}
             </div>
           </div>

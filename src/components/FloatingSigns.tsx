@@ -2,8 +2,8 @@
 
 /**
  * Community figures as floating "signs" around the 3D turbine, each tied to a point on it by a
- * leader line (see turbine/Callouts). Shared by the phone layout and the desktop / kiosk screen;
- * the desktop version uses larger cards and adds the 24-hour power chart.
+ * leader line or floating at a spot in the scene (see turbine/Callouts). Shared by the phone layout
+ * and the desktop / kiosk screen; the desktop version uses larger cards.
  */
 
 import { AnimatePresence, motion } from "framer-motion";
@@ -15,7 +15,6 @@ import {
   House,
   Leaf,
   Lightbulb,
-  RotateCw,
   Smartphone,
   Wind,
   Zap,
@@ -23,9 +22,8 @@ import {
 } from "lucide-react";
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import AnimatedNumber from "@/components/AnimatedNumber";
-import PowerTrend from "@/components/PowerTrend";
 import type { CalloutSpec } from "@/components/turbine/Callouts";
-import type { HistorySeries, LiveSnapshot } from "@/services/aceApi";
+import type { LiveSnapshot } from "@/services/aceApi";
 import { UK_HOUSEHOLD_KWH_PER_YEAR, compassPoint, describeWind, type CommunityMetrics } from "@/utils/metrics";
 
 /** True on the desktop / kiosk screen: larger signs. */
@@ -154,60 +152,41 @@ export function CyclingSign({ metrics, ready }: { metrics: CommunityMetrics; rea
 }
 
 /**
- * The six signs around the turbine: power (+ 24 h chart when wide), wind, homes powered, rotor,
- * CO2 avoided and a sign cycling through lifetime / community-fund figures and equivalents.
+ * Cards floating in the scene: CO2 avoided in the sky, wind beside the rotor, homes powered at
+ * the end of the power lines (towards Bristol) and a card cycling through lifetime / community
+ * fund figures and everyday equivalents. Rotor speed, power, pitch and nacelle direction are
+ * shown as live boxes on the turbine itself (turbine/SignalOverlay).
  */
 export function buildCallouts({
   live,
   metrics,
-  history = null,
   wide = false,
 }: {
   live: LiveSnapshot | null;
   metrics: CommunityMetrics;
-  history?: HistorySeries | null;
   wide?: boolean;
 }): CalloutSpec[] {
   const ready = live !== null;
   const windSpeed = live?.windSpeedMs ?? 0;
-  const rpm = live?.rotorSpeedRpm ?? 0;
   const windDirection = live?.windDirectionDeg ?? 225;
   const wind = compassPoint(windDirection);
   const dash = "—";
-  const pct = Math.round(metrics.capacityShare * 100);
 
   const callouts: CalloutSpec[] = [
     {
-      id: "power",
+      id: "co2",
       slot: "tl",
-      anchor: "hub",
       content: (
         <Sign
-          icon={Zap}
-          accent="bg-emerald-400 text-slate-950"
-          label="Power now"
-          sub={
-            <>
-              <span className="mb-1 block h-1.5 overflow-hidden rounded-full bg-white/15">
-                <span
-                  className="block h-full rounded-full bg-gradient-to-r from-emerald-400 to-lime-300 transition-[width] duration-1000"
-                  style={{ width: `${pct}%` }}
-                />
-              </span>
-              {ready ? `${pct}% of 4.2 MW` : "max 4.2 MW"}
-              {metrics.energy24hKwh !== null && ` · ${(metrics.energy24hKwh / 1000).toFixed(1)} MWh in 24 h`}
-              {wide && (
-                <span className="mt-[1vh] block h-[11vh]">
-                  <PowerTrend history={history} />
-                </span>
-              )}
-            </>
-          }
+          icon={Leaf}
+          accent="bg-lime-400 text-slate-950"
+          label="CO₂ avoided"
+          sub={metrics.co2Tonnes24h !== null ? `${metrics.co2Tonnes24h.toFixed(1)} t in the last 24 h` : "vs UK grid average"}
         >
           {ready ? (
             <>
-              <AnimatedNumber value={metrics.powerKw / 1000} decimals={2} />
-              <Unit>MW</Unit>
+              <AnimatedNumber value={metrics.co2KgPerHour} />
+              <Unit>kg/h</Unit>
             </>
           ) : (
             dash
@@ -246,55 +225,15 @@ export function buildCallouts({
     },
     {
       id: "homes",
-      slot: "ml",
-      anchor: "towerUpper",
+      anchor: "bristol",
       content: (
-        <Sign icon={House} accent="bg-amber-400 text-slate-950" label="Homes powered" sub="average UK homes, right now">
+        <Sign
+          icon={House}
+          accent="bg-amber-400 text-slate-950"
+          label="Homes powered"
+          sub="average UK homes, via the grid to Bristol"
+        >
           {ready ? <AnimatedNumber value={metrics.homesPowered} /> : dash}
-        </Sign>
-      ),
-    },
-    {
-      id: "rotor",
-      slot: "mr",
-      anchor: "nacelle",
-      content: (
-        <Sign
-          icon={RotateCw}
-          accent="bg-cyan-300 text-slate-950"
-          label="Rotor"
-          sub={ready ? (rpm > 0.2 ? `one turn every ${(60 / rpm).toFixed(1)} s` : "blades at rest") : dash}
-        >
-          {ready ? (
-            <>
-              <AnimatedNumber value={rpm} decimals={1} />
-              <Unit>rpm</Unit>
-            </>
-          ) : (
-            dash
-          )}
-        </Sign>
-      ),
-    },
-    {
-      id: "co2",
-      slot: "bl",
-      anchor: "towerLow",
-      content: (
-        <Sign
-          icon={Leaf}
-          accent="bg-lime-400 text-slate-950"
-          label="CO₂ avoided"
-          sub={metrics.co2Tonnes24h !== null ? `${metrics.co2Tonnes24h.toFixed(1)} t in the last 24 h` : "vs UK grid average"}
-        >
-          {ready ? (
-            <>
-              <AnimatedNumber value={metrics.co2KgPerHour} />
-              <Unit>kg/h</Unit>
-            </>
-          ) : (
-            dash
-          )}
         </Sign>
       ),
     },
