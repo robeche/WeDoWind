@@ -106,6 +106,49 @@ export interface TurbineStatusCode {
   observedAt: string;
 }
 
+/** Temperature sensors read from the `tep3c021` / `tep3c022` families (1-minute means), °C. */
+export type TemperatureId =
+  | "spinner"
+  | "frontBearing"
+  | "rearBearing"
+  | "pitchCabinetA"
+  | "pitchCabinetB"
+  | "pitchCabinetC"
+  | "bladeA"
+  | "bladeB"
+  | "bladeC"
+  | "genRotor1"
+  | "genRotor2"
+  | "coolingWater"
+  | "outsideHub"
+  | "nacelle"
+  | "nacelleCabinet"
+  | "mainCarrier"
+  | "yawInverter"
+  | "fanInverter"
+  | "outsideGround"
+  | "tower"
+  | "controlCabinet"
+  | "transformer"
+  | "inverterMax";
+
+/** Extra SCADA signals shown on the component panels. Any value can be null (sensor missing / implausible). */
+export interface LiveSignals {
+  reactivePowerKvar: number | null;
+  powerFactor: number | null;
+  frequencyHz: number | null;
+  /** Mean of the three low-voltage line-to-line voltages, V. */
+  voltageV: number | null;
+  /** Mean of the three grid phase currents, A. */
+  currentA: number | null;
+  operatingHours: number | null;
+  /** Mean blade (pitch) angle over the last minute, degrees. */
+  bladeAngleDeg: number | null;
+  temperatures: Partial<Record<TemperatureId, number>>;
+  /** ISO time of the temperature sample (null if unavailable). */
+  temperaturesAt: string | null;
+}
+
 export interface LiveSnapshot {
   /** ISO time of the SCADA observation. */
   observedAt: string;
@@ -126,6 +169,8 @@ export interface LiveSnapshot {
   statusCode: TurbineStatusCode | null;
   /** True when the SCADA observation itself is older than 5 minutes. */
   scadaStale: boolean;
+  /** Extra signals for the component panels (absent in snapshots saved by older versions). */
+  signals?: LiveSignals;
 }
 
 export interface HistoryPoint {
@@ -167,7 +212,51 @@ const LIVE_FIELDS = [
   "wec_wind_direction",
   "wec_nacelle_position",
   "wec_energy_exported",
+  "wec_reactive_power",
+  "wec_power_factor",
+  "wec_frequency",
+  "wec_voltage_l1",
+  "wec_voltage_l2",
+  "wec_voltage_l3",
+  "wec_current_l1",
+  "wec_current_l2",
+  "wec_current_l3",
+  "wec_operating_hours",
 ] as const;
+
+/** Temperature fields → panel ids. Families report 1-minute means. */
+const TEMPERATURE_FIELDS: Record<string, TemperatureId> = {
+  spinner_temperature_mean: "spinner",
+  front_bearing_temperature_mean: "frontBearing",
+  rear_bearing_temperature_mean: "rearBearing",
+  cabinet_a_temperature_mean: "pitchCabinetA",
+  cabinet_b_temperature_mean: "pitchCabinetB",
+  cabinet_c_temperature_mean: "pitchCabinetC",
+  blade_a_temperature_mean: "bladeA",
+  blade_b_temperature_mean: "bladeB",
+  blade_c_temperature_mean: "bladeC",
+  rotor_1_temperature_mean: "genRotor1",
+  rotor_2_temperature_mean: "genRotor2",
+  cooling_water_temperature_mean: "coolingWater",
+  outside_hub_height_temperature_mean: "outsideHub",
+  nacelle_temperature_mean: "nacelle",
+  nacelle_control_cabinet_temperature_mean: "nacelleCabinet",
+  main_carrier_temperature_mean: "mainCarrier",
+  yaw_inverter_cabinet_temperature_mean: "yawInverter",
+  fan_inverter_cabinet_temperature_mean: "fanInverter",
+  outside_ground_temperature_mean: "outsideGround",
+  tower_temperature_mean: "tower",
+  control_cabinet_temperature_mean: "controlCabinet",
+  transformer_temperature_mean: "transformer",
+};
+const INVERTER_FIELDS = Array.from({ length: 16 }, (_, i) => `inverter_${String(i + 1).padStart(2, "0")}_cabinet_temperature_mean`);
+/**
+ * Readings outside this range are treated as "sensor not available": some channels report
+ * placeholder values (e.g. 163 °C on the blade sensors, −44 °C on the cooling water).
+ */
+const PLAUSIBLE_TEMP_C: [number, number] = [-35, 150];
+/** The 1-minute families change slowly: fetch them at most this often (shared by all screens). */
+const SLOW_CACHE_MS = 30_000;
 
 const isFiniteNumber = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 
@@ -182,6 +271,27 @@ function lastValue(series: Array<number | null> | undefined): number | null {
     if (isFiniteNumber(v)) return v;
   }
   return null;
+}
+
+const mean = (values: Array<number | null>): number | null => {
+  const ok = values.filter(isFiniteNumber);
+  return ok.length ? ok.reduce((a, b) => a + b, 0) / ok.length : null;
+};
+
+/** Small time-based cache for the slow (1-minute) families; failures are never cached. */
+function slowCache<T>(load: () => Promise<T>): () => Promise<T> {
+  let entry: { at: number; promise: Promise<T> } | null = null;
+  return () => {
+    const now = Date.now();
+    if (entry && now - entry.at < SLOW_CACHE_MS) return entry.promise;
+    const promise = load();
+    const current = { at: now, promise };
+    entry = current;
+    promise.catch(() => {
+      if (entry === current) entry = null;
+    });
+    return promise;
+  };
 }
 
 async function upstreamJson<T>(path: string, params: Record<string, string>): Promise<T> {
@@ -231,16 +341,54 @@ function pickLatestStatus(events: AceEventRecord[]): TurbineStatusCode | null {
 /* Server-side upstream calls (used by the proxy route handlers)       */
 /* ------------------------------------------------------------------ */
 
-export async function fetchUpstreamLive(): Promise<LiveSnapshot> {
-  const assetBase = `/v1/sites/${ACE_SITE_ID}/assets/${ACE_TURBINE_ASSET_ID}`;
+const ASSET_BASE = `/v1/sites/${ACE_SITE_ID}/assets/${ACE_TURBINE_ASSET_ID}`;
 
-  const [dataResult, statusResult] = await Promise.allSettled([
-    upstreamJson<AceDataResponse>(`${assetBase}/data/wec_instantaneous/latest`, {
+const latestMinute = (family: string, fields: string[]) =>
+  upstreamJson<AceDataResponse>(`${ASSET_BASE}/data/${family}/latest`, {
+    resolution: "60s",
+    fields: fields.join(","),
+    limit: "1",
+  });
+
+const fetchSlowSignals = slowCache(async () => {
+  const [temps, inverters, wecstd] = await Promise.allSettled([
+    latestMinute("tep3c021", Object.keys(TEMPERATURE_FIELDS)),
+    latestMinute("tep3c022", INVERTER_FIELDS),
+    latestMinute("wecstd", ["blade_angle_mean"]),
+  ]);
+  const temperatures: Partial<Record<TemperatureId, number>> = {};
+  const plausible = (v: number | null) =>
+    v !== null && v >= PLAUSIBLE_TEMP_C[0] && v <= PLAUSIBLE_TEMP_C[1] ? v : null;
+  let temperaturesAt: string | null = null;
+  if (temps.status === "fulfilled") {
+    for (const [field, id] of Object.entries(TEMPERATURE_FIELDS)) {
+      const v = plausible(lastValue(temps.value.series?.[field]));
+      if (v !== null) temperatures[id] = v;
+    }
+    const ts = temps.value.timestamps?.at(-1);
+    if (ts) temperaturesAt = microsToIso(ts);
+  }
+  if (inverters.status === "fulfilled") {
+    const values = INVERTER_FIELDS.map((f) => plausible(lastValue(inverters.value.series?.[f]))).filter(isFiniteNumber);
+    if (values.length) temperatures.inverterMax = Math.max(...values);
+  }
+  const blade = wecstd.status === "fulfilled" ? lastValue(wecstd.value.series?.blade_angle_mean) : null;
+  return {
+    temperatures,
+    temperaturesAt,
+    bladeAngleDeg: blade !== null && blade >= -5 && blade <= 95 ? blade : null,
+  };
+});
+
+export async function fetchUpstreamLive(): Promise<LiveSnapshot> {
+  const [dataResult, statusResult, slowResult] = await Promise.allSettled([
+    upstreamJson<AceDataResponse>(`${ASSET_BASE}/data/wec_instantaneous/latest`, {
       resolution: "1s",
       fields: LIVE_FIELDS.join(","),
       limit: "5",
     }),
-    upstreamJson<AceEventResponse>(`${assetBase}/events/status/latest`, { limit: "10" }),
+    upstreamJson<AceEventResponse>(`${ASSET_BASE}/events/status/latest`, { limit: "10" }),
+    fetchSlowSignals(),
   ]);
 
   if (dataResult.status === "rejected") throw dataResult.reason;
@@ -281,6 +429,18 @@ export async function fetchUpstreamLive(): Promise<LiveSnapshot> {
     status: deriveStatus({ activePowerKw, rotorSpeedRpm, windSpeedMs, statusCode }),
     statusCode,
     scadaStale: Date.now() - observedMs > STALE_AFTER_MS,
+    // Extra signals are best effort: a failure here must not blank the display either.
+    signals: {
+      reactivePowerKvar: lastValue(data.series?.wec_reactive_power),
+      powerFactor: lastValue(data.series?.wec_power_factor),
+      frequencyHz: lastValue(data.series?.wec_frequency),
+      voltageV: mean(["wec_voltage_l1", "wec_voltage_l2", "wec_voltage_l3"].map((f) => lastValue(data.series?.[f]))),
+      currentA: mean(["wec_current_l1", "wec_current_l2", "wec_current_l3"].map((f) => lastValue(data.series?.[f]))),
+      operatingHours: lastValue(data.series?.wec_operating_hours),
+      bladeAngleDeg: slowResult.status === "fulfilled" ? slowResult.value.bladeAngleDeg : null,
+      temperatures: slowResult.status === "fulfilled" ? slowResult.value.temperatures : {},
+      temperaturesAt: slowResult.status === "fulfilled" ? slowResult.value.temperaturesAt : null,
+    },
   };
 }
 

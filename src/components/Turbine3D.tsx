@@ -4,7 +4,7 @@ import { OrbitControls, Sky } from "@react-three/drei";
 import { Canvas, useFrame, useThree, type RootState } from "@react-three/fiber";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ComponentRef } from "react";
 import * as THREE from "three";
-import type { TurbineStatus } from "@/services/aceApi";
+import type { LiveSnapshot, TurbineStatus } from "@/services/aceApi";
 
 import {
   DEG,
@@ -64,6 +64,8 @@ export interface Turbine3DProps {
   powerKw?: number;
   status: TurbineStatus;
   hasData: boolean;
+  /** Full live snapshot: signal tiles on the component panels and the real blade pitch. */
+  snapshot?: LiveSnapshot | null;
   className?: string;
   /** Called when a visitor starts / stops exploring (a part selected or the tower open). */
   onExploringChange?: (exploring: boolean) => void;
@@ -163,6 +165,9 @@ function useTurbineGeometries() {
 
 function targetPitchRad(live: LiveInputs): number {
   if (!live.hasData) return 88 * DEG;
+  // Measured blade angle (1-minute mean) when the turbine reports it.
+  const measured = live.snapshot?.signals?.bladeAngleDeg;
+  if (typeof measured === "number" && Number.isFinite(measured)) return measured * DEG;
   switch (live.status) {
     case "Generating":
       // Above rated wind the blades pitch out to shed excess power.
@@ -1016,6 +1021,7 @@ export default function Turbine3D({
         onSelect={select}
         onGoTo={goTo}
         onClose={close}
+        snapshot={props.snapshot ?? null}
       />
     </div>
   );

@@ -171,6 +171,7 @@ export default function KioskPage() {
           powerKw={metrics.powerKw}
               status={status}
               hasData={ready}
+              snapshot={live}
               onExploringChange={setExploring}
             />
           </SafeBoundary>

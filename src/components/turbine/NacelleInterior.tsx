@@ -32,20 +32,36 @@ function useVisible(progressRef: React.RefObject<number>) {
   return ref;
 }
 
+/** Heat-exchanger core size (m) and the open fin pack's spacing. */
+const COOLER = { w: 2.1, h: 1.9, d: 0.16, y: -0.25 };
+/** Fins across the core (one per texture tile); the gaps between them are see-through. */
+const FIN_COUNT = 26;
+/** Wire-mesh cage around the core: mesh pitch (m) and how far it stands off the core. */
+const CAGE_PITCH = 0.16;
+const CAGE_GAP = 0.1;
+
+/**
+ * One fin per tile: an opaque aluminium strip with a coolant tube crossing it, transparent
+ * elsewhere (alphaTest), so the fans behind the exchanger stay visible.
+ */
 function useFinTexture() {
   const tex = useMemo(() => {
     const c = document.createElement("canvas");
-    c.width = 64;
+    c.width = 16;
     c.height = 64;
     const ctx = c.getContext("2d")!;
-    ctx.fillStyle = "#9aa3ab";
-    ctx.fillRect(0, 0, 64, 64);
-    ctx.fillStyle = "#5c656d";
-    for (let x = 0; x < 64; x += 4) ctx.fillRect(x, 0, 1, 64);
+    ctx.clearRect(0, 0, 16, 64);
+    ctx.fillStyle = "#b9c1c8";
+    ctx.fillRect(0, 0, 4, 64); // fin
+    ctx.fillStyle = "#8a939b";
+    ctx.fillRect(4, 0, 1, 64); // fin edge shading
+    ctx.fillStyle = "#c97a4a";
+    for (const y of [10, 42]) ctx.fillRect(0, y, 16, 3); // copper coolant tubes through the fins
     const t = new THREE.CanvasTexture(c);
     t.wrapS = THREE.RepeatWrapping;
     t.wrapT = THREE.RepeatWrapping;
-    t.repeat.set(8, 1);
+    t.repeat.set(FIN_COUNT, 3);
+    t.magFilter = THREE.NearestFilter;
     t.colorSpace = THREE.SRGBColorSpace;
     return t;
   }, []);
@@ -77,6 +93,58 @@ function Fan({ position }: { position: [number, number, number] }) {
         </mesh>
       </group>
     </group>
+  );
+}
+
+/** Steel frame around the heat-exchanger core. */
+function CoolerFrame() {
+  const t = 0.06;
+  const bars: Array<[[number, number, number], [number, number, number]]> = [
+    [[0, COOLER.h / 2 + t / 2, 0], [COOLER.w + 2 * t, t, COOLER.d]],
+    [[0, -COOLER.h / 2 - t / 2, 0], [COOLER.w + 2 * t, t, COOLER.d]],
+    [[COOLER.w / 2 + t / 2, 0, 0], [t, COOLER.h, COOLER.d]],
+    [[-COOLER.w / 2 - t / 2, 0, 0], [t, COOLER.h, COOLER.d]],
+    [[0, 0, 0], [0.04, COOLER.h, COOLER.d]], // centre post between the two fans
+  ];
+  return (
+    <group position={[0, COOLER.y, COOLER_Z]}>
+      {bars.map(([pos, size], i) => (
+        <mesh key={i} position={pos}>
+          <boxGeometry args={size} />
+          <meshStandardMaterial color="#4b5563" metalness={0.6} roughness={0.45} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+/** Thin wire-mesh guard on the machine-room side of the exchanger (lines: nearly see-through). */
+function CoolerCage() {
+  const geometry = useMemo(() => {
+    const w = COOLER.w / 2 + 0.06;
+    const h = COOLER.h / 2 + 0.06;
+    const z = CAGE_GAP + COOLER.d / 2;
+    const pts: number[] = [];
+    const seg = (a: [number, number, number], b: [number, number, number]) => pts.push(...a, ...b);
+    // Mesh on the face and the four sides (a shallow box over the core).
+    for (let x = -w; x <= w + 1e-6; x += CAGE_PITCH) seg([x, -h, z], [x, h, z]);
+    for (let y = -h; y <= h + 1e-6; y += CAGE_PITCH) seg([-w, y, z], [w, y, z]);
+    for (const sx of [-w, w]) {
+      seg([sx, -h, 0], [sx, -h, z]);
+      seg([sx, h, 0], [sx, h, z]);
+      for (let y = -h; y <= h + 1e-6; y += CAGE_PITCH * 2) seg([sx, y, 0], [sx, y, z]);
+    }
+    for (const sy of [-h, h]) for (let x = -w; x <= w + 1e-6; x += CAGE_PITCH * 2) seg([x, sy, 0], [x, sy, z]);
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(pts, 3));
+    return g;
+  }, []);
+  useEffect(() => () => geometry.dispose(), [geometry]);
+  return (
+    // Lines would otherwise catch the pointer from ~1 m away (raycaster line threshold).
+    <lineSegments geometry={geometry} position={[0, COOLER.y, COOLER_Z]} raycast={() => null}>
+      <lineBasicMaterial color="#6b7280" transparent opacity={0.75} />
+    </lineSegments>
   );
 }
 
@@ -179,11 +247,14 @@ function NacelleInteriorImpl({ progressRef }: { progressRef: React.RefObject<num
       </Part>
 
       <Part id="cooling" labelAt={[0, 1.1, COOLER_Z - 0.1]}>
-        {/* Heat exchanger (finned) across the back of the nacelle */}
-        <mesh position={[0, -0.25, COOLER_Z]}>
-          <boxGeometry args={[2.1, 1.9, 0.16]} />
-          <meshStandardMaterial map={fins} metalness={0.6} roughness={0.4} />
+        {/* Heat exchanger across the back of the nacelle: an open fin pack in a frame, guarded
+            by a wire-mesh cage, so the fans behind it stay visible. */}
+        <mesh position={[0, COOLER.y, COOLER_Z]}>
+          <planeGeometry args={[COOLER.w, COOLER.h]} />
+          <meshStandardMaterial map={fins} alphaTest={0.5} side={THREE.DoubleSide} metalness={0.55} roughness={0.4} />
         </mesh>
+        <CoolerFrame />
+        <CoolerCage />
         <Fan position={[-0.52, -0.25, COOLER_Z - 0.16]} />
         <Fan position={[0.52, -0.25, COOLER_Z - 0.16]} />
         {/* Pump skid */}

@@ -2,6 +2,7 @@
 
 import { AnimatePresence, motion } from "framer-motion";
 import { Hand, X } from "lucide-react";
+import type { LiveSnapshot } from "@/services/aceApi";
 import {
   EXTERIOR_PARTS,
   OPEN_CHILDREN,
@@ -11,6 +12,7 @@ import {
   type OpenableId,
   type PartId,
 } from "./parts";
+import { signalTiles } from "./signals";
 
 interface Props {
   /** Phone layout: the panel becomes a bottom sheet. */
@@ -20,6 +22,8 @@ interface Props {
   onSelect: (id: PartId) => void;
   onGoTo: (focus: Focus) => void;
   onClose: () => void;
+  /** Latest live data, for the signal tiles shown while a part is open. */
+  snapshot?: LiveSnapshot | null;
 }
 
 const CARD_BASE = "pointer-events-auto absolute overflow-y-auto bg-slate-950/80 text-white shadow-2xl ring-1 ring-white/15 backdrop-blur";
@@ -37,7 +41,52 @@ const OPEN_TITLE: Record<OpenableId, string> = {
 };
 
 /** HTML overlay describing the selected component; becomes a navigator while a part is open. */
-export default function InfoPanel({ compact = false, selectedId, openPart, onSelect, onGoTo, onClose }: Props) {
+/** Live SCADA tiles for the opened part; the selected component's own signals are highlighted. */
+function SignalGrid({
+  openPart,
+  selectedId,
+  snapshot,
+  compact,
+  small,
+}: {
+  openPart: OpenableId;
+  selectedId: PartId | null;
+  snapshot: LiveSnapshot | null;
+  compact: boolean;
+  small: string;
+}) {
+  const tiles = signalTiles(openPart, selectedId, snapshot);
+  const stale = !snapshot || snapshot.scadaStale;
+  return (
+    <section className="mt-[1.6vh]" aria-label="Live signals">
+      <div className={`${small} flex items-center gap-2 font-semibold text-white/60`}>
+        <span className={`size-2 rounded-full ${stale ? "bg-amber-400" : "animate-pulse bg-emerald-400"}`} />
+        {stale ? "Latest data" : "Live data"}
+      </div>
+      <div className={`mt-[0.6vh] grid gap-[0.7vh] ${compact ? "grid-cols-2" : "grid-cols-3"}`}>
+        {tiles.map((t) => (
+          <div
+            key={t.id}
+            className={`rounded-xl px-2.5 py-[0.7vh] ring-1 transition-colors ${
+              t.highlight ? "bg-emerald-400/15 ring-emerald-300/70" : "bg-white/[0.06] ring-white/10"
+            }`}
+          >
+            <div className={`truncate text-white/60 ${compact ? "text-[0.7rem]" : "text-[clamp(0.65rem,1.35vh,1rem)]"}`}>{t.label}</div>
+            <div className={`font-bold tabular-nums leading-tight ${compact ? "text-base" : "text-[clamp(0.95rem,2vh,1.5rem)]"}`}>
+              {t.value}
+              {t.unit && <span className="ml-1 text-[0.7em] font-semibold text-white/60">{t.unit}</span>}
+            </div>
+          </div>
+        ))}
+      </div>
+      <p className={`mt-[0.6vh] text-white/40 ${compact ? "text-[0.65rem]" : "text-[clamp(0.6rem,1.2vh,0.9rem)]"}`}>
+        Turbine SCADA via ACE open data (CC-BY-4.0). Temperatures are 1-minute means; missing sensors are hidden.
+      </p>
+    </section>
+  );
+}
+
+export default function InfoPanel({ compact = false, selectedId, openPart, onSelect, onGoTo, onClose, snapshot = null }: Props) {
   const info = selectedId ? PART_INFO[selectedId] : null;
   const card = compact ? CARD_SHEET : CARD_SIDE;
   const small = compact ? SMALL_SHEET : SMALL_SIDE;
@@ -76,6 +125,8 @@ export default function InfoPanel({ compact = false, selectedId, openPart, onSel
           </div>
 
           <p className={`${small} mt-[1vh] leading-snug text-white/80`}>{item ? item.description : parentInfo.intro}</p>
+
+          <SignalGrid openPart={openPart} selectedId={selectedId} snapshot={snapshot} compact={compact} small={small} />
 
           <div className="mt-[1.6vh] grid grid-cols-2 gap-[0.8vh]">
             {OPEN_CHILDREN[openPart].map((id) => (

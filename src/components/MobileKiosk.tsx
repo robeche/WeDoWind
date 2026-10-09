@@ -320,6 +320,7 @@ export default function MobileKiosk({
           powerKw={metrics.powerKw}
           status={status}
           hasData={ready}
+          snapshot={live}
           onExploringChange={setExploring}
         />
       </SafeBoundary>
