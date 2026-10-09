@@ -79,10 +79,18 @@ export const Unit = ({ children }: { children: ReactNode }) => (
   <span className="ml-0.5 text-[0.55em] font-bold text-white/70">{children}</span>
 );
 
-/** Bottom-right sign: cycles through lifetime energy / community fund and everyday equivalents. */
+/** Bottom-right sign: cycles through homes powered, lifetime energy / community fund and everyday equivalents. */
 export function CyclingSign({ metrics, ready }: { metrics: CommunityMetrics; ready: boolean }) {
   const items = useMemo(() => {
     const list: Array<{ key: string; icon: LucideIcon; accent: string; label: string; value: ReactNode; sub: string }> = [];
+    list.push({
+      key: "homes",
+      icon: House,
+      accent: "bg-amber-400 text-slate-950",
+      label: "Homes powered",
+      value: <AnimatedNumber value={metrics.homesPowered} />,
+      sub: "average UK homes' worth, right now",
+    });
     if (metrics.fundGbpPerHour !== null) {
       list.push({
         key: "fund",
@@ -152,10 +160,10 @@ export function CyclingSign({ metrics, ready }: { metrics: CommunityMetrics; rea
 }
 
 /**
- * Cards floating in the scene: CO2 avoided in the sky, wind beside the rotor, homes powered at
- * the end of the power lines (towards Bristol) and a card cycling through lifetime / community
- * fund figures and everyday equivalents. Rotor speed, power, pitch and nacelle direction are
- * shown as live boxes on the turbine itself (turbine/SignalOverlay).
+ * Cards floating in the scene: CO2 avoided in the sky, wind beside the rotor and a card cycling
+ * through homes powered, lifetime / community fund figures and everyday equivalents. Rotor
+ * speed, power, pitch and nacelle direction are shown as live boxes on the turbine itself
+ * (turbine/SignalOverlay).
  */
 export function buildCallouts({
   live,
@@ -220,20 +228,6 @@ export function buildCallouts({
           ) : (
             dash
           )}
-        </Sign>
-      ),
-    },
-    {
-      id: "homes",
-      anchor: "bristol",
-      content: (
-        <Sign
-          icon={House}
-          accent="bg-amber-400 text-slate-950"
-          label="Homes powered"
-          sub="average UK homes, via the grid to Bristol"
-        >
-          {ready ? <AnimatedNumber value={metrics.homesPowered} /> : dash}
         </Sign>
       ),
     },
