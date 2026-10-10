@@ -5,10 +5,11 @@ import { useFrame } from "@react-three/fiber";
 import { useMemo, useRef } from "react";
 import * as THREE from "three";
 import type { Line2 } from "three-stdlib";
+import { RATED_POWER_KW } from "@/services/aceApi";
 import { CABLE_ROUTE, GRID_LINES, SEABANK_SUBSTATION, type GridLine } from "./gridData";
 
 /** Rated output of the turbine (kW): full flow speed and brightness at this power. */
-const RATED_KW = 4200;
+const RATED_KW = RATED_POWER_KW;
 /** Gantry height (m) where the lines leave the substation. */
 const GANTRY_Y = 12;
 const ENERGY_COLOR = "#fde047";

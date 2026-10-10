@@ -18,8 +18,16 @@ export const UK_HOUSEHOLD_KWH_PER_YEAR = (() => {
 })();
 /** Average household as a continuous load: 2,500 kWh ÷ 8,760 h ≈ 0.285 kW. */
 export const UK_HOUSEHOLD_AVG_KW = UK_HOUSEHOLD_KWH_PER_YEAR / 8760;
-/** UK National Grid displacement average, kg CO2 per kWh. */
-export const GRID_CARBON_KG_PER_KWH = 0.21;
+/**
+ * UK grid electricity emissions, kg CO2e per kWh: DESNZ "Greenhouse gas reporting: conversion
+ * factors 2026" (UK electricity, generation) = 0.13096 (0.177 in 2025). An average-grid factor:
+ * conservative, since wind mostly displaces gas generation. Override with
+ * NEXT_PUBLIC_GRID_CARBON_KG_PER_KWH.
+ */
+export const GRID_CARBON_KG_PER_KWH = (() => {
+  const v = Number.parseFloat(process.env.NEXT_PUBLIC_GRID_CARBON_KG_PER_KWH ?? "");
+  return Number.isFinite(v) && v > 0 ? v : 0.13096;
+})();
 /** Typical UK kettle element rating. */
 export const KETTLE_KW = 2.5;
 /** Typical UK EV efficiency (~0.29 kWh per mile). */
@@ -45,7 +53,7 @@ const safe = (kw: number) => (Number.isFinite(kw) && kw > 0 ? kw : 0);
 /** Homes powered right now = kW / average household load (≈0.285 kW). */
 export const homesPowered = (kw: number) => safe(kw) / UK_HOUSEHOLD_AVG_KW;
 
-/** CO2 avoided per hour at the current output = kW × 0.21 kg/kWh. */
+/** CO2 avoided per hour at the current output = kW × grid factor (kg/kWh). */
 export const co2AvoidedKgPerHour = (kw: number) => safe(kw) * GRID_CARBON_KG_PER_KWH;
 
 /** Kettles that could be boiling simultaneously = kW / 2.5 kW. */

@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 
 export const COMMUNITY_MESSAGES = [
   "Did you know? This 4.2 MW turbine is community-owned by Lawrence Weston.",
-  "Profits from this turbine help fund local warm spaces, energy advice, and community action through ALW.",
+  "Surplus income from this turbine goes to Ambition Lawrence Weston for projects in the local community.",
   "The blades on this screen turn at exactly the same speed as the real turbine — right now.",
   "At around 150 metres to the blade tip, this is one of the tallest onshore wind turbines in England.",
   "Each of the three blades is 56 metres long — longer than an Olympic swimming pool.",

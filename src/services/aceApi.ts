@@ -9,7 +9,11 @@
 export const ACE_API_BASE_URL = process.env.ACE_API_BASE_URL ?? "https://ace-api.duckdns.org";
 export const ACE_SITE_ID = "ace";
 export const ACE_TURBINE_ASSET_ID = "wec-1";
-export const RATED_POWER_KW = 4200;
+/**
+ * Nominal power of this turbine as reported by its own SCADA (`wec_nominal_power` = 4245 kW,
+ * ENERCON EP3-CS02 / E-115 E3, serial 1160104, site "Avonmouth, Bristol"). Shown as "4.2 MW".
+ */
+export const RATED_POWER_KW = 4245;
 
 const UPSTREAM_TIMEOUT_MS = 6000;
 export const STALE_AFTER_MS = 5 * 60 * 1000;

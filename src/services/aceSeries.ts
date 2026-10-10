@@ -45,8 +45,13 @@ export interface DailyEnergy {
   day: string;
   /** Today: the day is not over yet. */
   partial: boolean;
+  /**
+   * True when the turbine's official daily total is not published yet and the value was
+   * worked out from the 10-minute energy counter (typically yesterday and today).
+   */
+  estimated: boolean;
   mwh: number;
-  /** Share of the turbine's 4.2 MW × 24 h maximum. */
+  /** Share of the turbine's nominal power (4245 kW) × 24 h. */
   capacityFactor: number;
 }
 
@@ -189,9 +194,27 @@ function dailyEnergy(t: number[], counter: Array<number | null>): DailyEnergy[] 
     prev = end;
     // Skip resets / implausible jumps (more than the turbine could make in a day).
     if (kwh === null || kwh < 0 || kwh > RATED_POWER_KW * 24 * 1.05) continue;
-    out.push({ day, partial: day === today, mwh: kwh / 1000, capacityFactor: kwh / (RATED_POWER_KW * 24) });
+    out.push({ day, partial: day === today, estimated: true, mwh: kwh / 1000, capacityFactor: kwh / (RATED_POWER_KW * 24) });
   }
   return out;
+}
+
+/**
+ * Daily energy per UK day: the turbine's official daily totals where published, else the
+ * counter-based estimate. The first, partly covered day of the window is left out.
+ */
+function mergeDaily(official: RangeResult, fromCounter: DailyEnergy[]): DailyEnergy[] {
+  const byDay = new Map<string, DailyEnergy>(fromCounter.map((d) => [d.day, d]));
+  const firstCounterDay = fromCounter[0]?.day;
+  official.t.forEach((ms, i) => {
+    const kwh = official.series.energy_produced?.[i];
+    const day = UK_DAY.format(new Date(ms));
+    if (kwh === null || kwh === undefined || kwh < 0 || kwh > RATED_POWER_KW * 24 * 1.05) return;
+    // Only full days inside the window (the counter series already starts on the first full day).
+    if (firstCounterDay && day < firstCounterDay) return;
+    byDay.set(day, { day, partial: false, estimated: false, mwh: kwh / 1000, capacityFactor: kwh / (RATED_POWER_KW * 24) });
+  });
+  return [...byDay.values()].sort((a, b) => a.day.localeCompare(b.day));
 }
 
 const loadStats = cached<StatsData>(
@@ -200,7 +223,7 @@ const loadStats = cached<StatsData>(
     const days = Number(key) as StatsRange;
     const end = new Date();
     const start = new Date(end.getTime() - days * 86_400_000);
-    const [std, temps] = await Promise.all([
+    const [std, temps, officialDaily] = await Promise.all([
       fetchRange(
         "wecstd",
         "10m",
@@ -226,6 +249,11 @@ const loadStats = cached<StatsData>(
         start,
         end,
       ).catch(() => ({ t: [], series: {} as Record<string, Array<number | null>> })),
+      // The turbine's own daily energy totals (records stamped at the start of each UK day).
+      fetchRange("wecstd", "daily", ["energy_produced"], start, end).catch(() => ({
+        t: [],
+        series: {} as Record<string, Array<number | null>>,
+      })),
     ]);
     // Align temperatures on the wecstd timestamps.
     const tempAt = new Map<number, number>();
@@ -255,7 +283,7 @@ const loadStats = cached<StatsData>(
         outsideTemp: temp("outside_hub_height_temperature_mean"),
         transformerTemp: temp("transformer_temperature_mean"),
       },
-      daily: dailyEnergy(std.t, std.series.energy_produced),
+      daily: mergeDaily(officialDaily, dailyEnergy(std.t, std.series.energy_produced)),
       resolutionSeconds: 600,
       from: start.toISOString(),
       to: end.toISOString(),

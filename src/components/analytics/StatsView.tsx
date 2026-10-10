@@ -4,6 +4,7 @@
 
 import { useMemo, useState } from "react";
 import { useStats } from "@/hooks/useTurbineData";
+import { RATED_POWER_KW as RATED_KW } from "@/services/aceApi";
 import BarChart from "@/components/charts/BarChart";
 import ScatterChart from "@/components/charts/ScatterChart";
 import TimeChart from "@/components/charts/TimeChart";
@@ -16,7 +17,6 @@ const RANGES: Array<{ value: Days; label: string }> = [
   { value: 30, label: "30 days" },
   { value: 90, label: "90 days" },
 ];
-const RATED_KW = 4200;
 const BIN = 0.5; // m/s, power-curve bins
 
 /** Median power per 0.5 m/s wind bin (bins with at least 5 points). */
@@ -81,7 +81,9 @@ export default function StatsView({ active }: { active: boolean }) {
         key: x.day,
         label: x.partial ? "Today" : formatDay(x.day),
         value: x.mwh,
-        note: x.partial ? "today so far" : `${Math.round(x.capacityFactor * 100)}% of the maximum possible`,
+        note: x.partial
+          ? "today so far (from the energy counter)"
+          : `${Math.round(x.capacityFactor * 100)}% of the maximum possible${x.estimated ? " · from the energy counter" : ""}`,
       })),
       power: [
         {

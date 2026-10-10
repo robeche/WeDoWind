@@ -62,7 +62,7 @@ const SPECS: Record<Exclude<SignalId, `temp:${string}`>, SignalSpec> = {
   rotorSpeed: { id: "rotorSpeed", label: "Rotor speed", unit: "rpm", digits: 1, read: (s) => s.rotorSpeedRpm },
   torque: {
     id: "torque",
-    label: "Torque",
+    label: "Torque (calc.)",
     unit: "kN·m",
     digits: 0,
     // Direct drive: generator speed = rotor speed. T = P / ω (electrical, so a slight underestimate).
@@ -70,7 +70,7 @@ const SPECS: Record<Exclude<SignalId, `temp:${string}`>, SignalSpec> = {
   },
   tipSpeed: {
     id: "tipSpeed",
-    label: "Tip speed",
+    label: "Tip speed (calc.)",
     unit: "km/h",
     digits: 0,
     read: (s) => ((s.rotorSpeedRpm * 2 * Math.PI) / 60) * ROTOR_RADIUS * 3.6,
