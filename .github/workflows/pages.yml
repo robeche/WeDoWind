@@ -1,0 +1,53 @@
+# Publishes the kiosk as a static site on GitHub Pages: https://<owner>.github.io/<repo>/
+# Without a server, the browser calls the ACE API directly (see next.config.ts).
+# Optional settings come from repository variables (Settings → Secrets and variables → Actions → Variables).
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - id: pages
+        uses: actions/configure-pages@v5
+      - run: npm ci
+      - name: Static build
+        run: npm run build:static
+        env:
+          # "/WeDoWind" for a project site, "" with a custom domain.
+          BASE_PATH: ${{ steps.pages.outputs.base_path }}
+          NEXT_TELEMETRY_DISABLED: "1"
+          NEXT_PUBLIC_HOUSEHOLD_KWH_PER_YEAR: ${{ vars.NEXT_PUBLIC_HOUSEHOLD_KWH_PER_YEAR }}
+          NEXT_PUBLIC_GRID_CARBON_KG_PER_KWH: ${{ vars.NEXT_PUBLIC_GRID_CARBON_KG_PER_KWH }}
+          NEXT_PUBLIC_COMMUNITY_FUND_GBP_PER_KWH: ${{ vars.NEXT_PUBLIC_COMMUNITY_FUND_GBP_PER_KWH }}
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: out
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

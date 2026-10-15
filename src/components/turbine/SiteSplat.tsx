@@ -16,9 +16,11 @@ import SafeBoundary from "../SafeBoundary";
  */
 /** Bump when the files are re-exported, so browsers and kiosks do not keep a cached copy. */
 const SPLAT_VERSION = 2;
-export const SITE_SPLAT_URL = `/splats/lawrence-weston.splat?v=${SPLAT_VERSION}`;
+/** "" normally; the repo sub-path (e.g. "/WeDoWind") in the GitHub Pages build. */
+const BASE = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+export const SITE_SPLAT_URL = `${BASE}/splats/lawrence-weston.splat?v=${SPLAT_VERSION}`;
 /** Lighter version (fewer, larger splats) for phones. */
-export const SITE_SPLAT_LITE_URL = `/splats/lawrence-weston-lite.splat?v=${SPLAT_VERSION}`;
+export const SITE_SPLAT_LITE_URL = `${BASE}/splats/lawrence-weston-lite.splat?v=${SPLAT_VERSION}`;
 
 /**
  * drei's splat loader needs a Content-Length header, but hosts that compress on the fly

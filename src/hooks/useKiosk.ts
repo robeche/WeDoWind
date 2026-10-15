@@ -83,7 +83,7 @@ export function useKioskMaintenance(reloadAtUk = "04:00") {
     const id = setInterval(async () => {
       if (fmt.format(new Date()) !== reloadAtUk || Date.now() - startedAt < 60 * 60_000) return;
       try {
-        const res = await fetch("/", { method: "HEAD", cache: "no-store" });
+        const res = await fetch(`${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/`, { method: "HEAD", cache: "no-store" });
         if (res.ok) window.location.reload();
       } catch {
         // Offline: keep running on cached data and try again tomorrow.

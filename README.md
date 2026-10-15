@@ -38,6 +38,23 @@ npm run build
 npm run start
 ```
 
+## Static build (GitHub Pages)
+
+The kiosk can also run with no server at all, e.g. on GitHub Pages:
+
+```bash
+npm run build:static        # → out/, served from /WeDoWind/ (BASE_PATH="" for a domain root)
+```
+
+In this build the `/api/ace/*` proxy routes are left out (a static host cannot run them) and the
+browser calls the ACE API directly, which serves CORS headers for any origin. Everything else is
+identical to the server build.
+
+`.github/workflows/pages.yml` publishes it automatically on every push to `master`. One-time
+setup: repository **Settings → Pages → Build and deployment → Source: GitHub Actions**. The site
+is then at https://robeche.github.io/WeDoWind/. Optional `NEXT_PUBLIC_*` settings (see
+Configuration) can be set as repository *variables*.
+
 ## The turbine
 
 ENERCON E-115 E3, 4.2 MW: 115.7 m rotor (56 m blades), ~92 m hub height, 150 m to the blade tip.
@@ -64,7 +81,7 @@ Copy `.env.example` to `.env.local`:
 
 ## Environment notes
 
-The app fetches live data through the project’s API routes rather than directly from the browser, so it avoids client-side CORS and mixed-content issues.
+The server build (Vercel, `npm start`) fetches live data through the project’s API routes, which cache upstream requests shared by every screen. The static build (GitHub Pages) has no server, so each browser calls the ACE API directly.
 
 ## License
 

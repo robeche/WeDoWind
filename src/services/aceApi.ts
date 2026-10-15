@@ -3,7 +3,10 @@
  * Data licence: CC-BY-4.0 — cite https://doi.org/10.5281/zenodo.22662372
  *
  * Server functions (fetchUpstream*) are used by the Next.js proxy routes in /api/ace/*.
- * Browser functions (getLive / getHistory) only ever call the same-origin proxy.
+ * Browser functions (getLive / getHistory / getTrends / getStats) call that same-origin proxy,
+ * except in the static build (GitHub Pages, NEXT_PUBLIC_ACE_DIRECT=1): there is no server
+ * there, so the browser runs the same fetchUpstream* code against the ACE API directly
+ * (it serves CORS headers for any origin).
  */
 
 export const ACE_API_BASE_URL = process.env.ACE_API_BASE_URL ?? "https://ace-api.duckdns.org";
@@ -303,7 +306,8 @@ export async function upstreamJson<T>(path: string, params: Record<string, strin
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
 
   const res = await fetch(url, {
-    headers: { Accept: "application/json", "User-Agent": USER_AGENT },
+    // Browsers do not let pages set User-Agent (and it would force a CORS preflight).
+    headers: typeof window === "undefined" ? { Accept: "application/json", "User-Agent": USER_AGENT } : { Accept: "application/json" },
     cache: "no-store",
     signal: AbortSignal.timeout(timeoutMs),
   });
@@ -511,8 +515,31 @@ export async function fetchUpstreamHistory(hours: number): Promise<HistorySeries
 }
 
 /* ------------------------------------------------------------------ */
-/* Browser-side calls (same-origin proxy — no CORS / mixed content)    */
+/* Browser-side calls (same-origin proxy, or direct in the static build) */
 /* ------------------------------------------------------------------ */
+
+/** Static build without a server (GitHub Pages): call the ACE API from the browser. */
+export const ACE_DIRECT = process.env.NEXT_PUBLIC_ACE_DIRECT === "1";
+
+/** Resolve `promise`, or reject as soon as `signal` aborts (the upstream call itself carries on). */
+function withSignal<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (v) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(v);
+      },
+      (e) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(e);
+      },
+    );
+  });
+}
 
 async function proxyJson<T>(url: string, signal?: AbortSignal): Promise<T> {
   const res = await fetch(url, {
@@ -524,13 +551,29 @@ async function proxyJson<T>(url: string, signal?: AbortSignal): Promise<T> {
   return (await res.json()) as T;
 }
 
-export const getLive = (signal?: AbortSignal) => proxyJson<LiveSnapshot>("/api/ace/live", signal);
+export const getLive = (signal?: AbortSignal) =>
+  ACE_DIRECT ? withSignal(fetchUpstreamLive(), signal) : proxyJson<LiveSnapshot>("/api/ace/live", signal);
 
-export const getHistory = (hours = 24, signal?: AbortSignal) =>
-  proxyJson<HistorySeries>(`/api/ace/history?hours=${encodeURIComponent(hours)}`, signal);
+export const getHistory = (hours = 24, signal?: AbortSignal) => {
+  // Same bounds as the /api/ace/history route.
+  const h = Number.isFinite(hours) ? Math.min(Math.max(Math.round(hours), 1), 48) : 24;
+  return ACE_DIRECT
+    ? withSignal(fetchUpstreamHistory(h), signal)
+    : proxyJson<HistorySeries>(`/api/ace/history?hours=${encodeURIComponent(h)}`, signal);
+};
 
-export const getTrends = (window: string, signal?: AbortSignal) =>
-  proxyJson<import("./aceSeries").TrendData>(`/api/ace/trends?window=${encodeURIComponent(window)}`, signal);
+export const getTrends = async (window: string, signal?: AbortSignal) => {
+  if (!ACE_DIRECT)
+    return proxyJson<import("./aceSeries").TrendData>(`/api/ace/trends?window=${encodeURIComponent(window)}`, signal);
+  const { TREND_WINDOWS, fetchUpstreamTrends } = await import("./aceSeries");
+  const w = (TREND_WINDOWS as string[]).includes(window) ? (window as import("./aceSeries").TrendWindow) : "6h";
+  return withSignal(fetchUpstreamTrends(w), signal);
+};
 
-export const getStats = (days: number, signal?: AbortSignal) =>
-  proxyJson<import("./aceSeries").StatsData>(`/api/ace/stats?days=${encodeURIComponent(days)}`, signal);
+export const getStats = async (days: number, signal?: AbortSignal) => {
+  if (!ACE_DIRECT)
+    return proxyJson<import("./aceSeries").StatsData>(`/api/ace/stats?days=${encodeURIComponent(days)}`, signal);
+  const { STATS_RANGES, fetchUpstreamStats } = await import("./aceSeries");
+  const d = (STATS_RANGES as number[]).includes(days) ? (days as import("./aceSeries").StatsRange) : 30;
+  return withSignal(fetchUpstreamStats(d), signal);
+};
