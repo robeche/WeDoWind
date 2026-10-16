@@ -3,11 +3,10 @@
  * cuts cleanly across faceted surfaces without extra geometry.
  *
  * - Nacelle: a 2 m red belt around the middle of the machine house.
- * - Blades: the outer 18 m in three 6 m fields, red – white – red (red at the tip).
+ * The blades carry no bands (plain white).
  */
 
 import * as THREE from "three";
-import { ROTOR_RADIUS } from "./dimensions";
 
 /** Traffic red (RAL 3020 style). */
 export const MARKING_RED = "#c4161c";
@@ -38,12 +37,3 @@ function bandedMaterialHook(bands: Band[], key: string) {
 /** Nacelle frame: shaft axis at y = 0; the box spans about −2.65 … 1.55 m. */
 export const NACELLE_BAND: Band = [-1.45, 0.55];
 export const nacelleLivery = bandedMaterialHook([NACELLE_BAND], "livery-nacelle");
-
-/** Blade frame: local y is the radius from the rotor axis (root at BLADE_ROOT_R). */
-const FIELD = 6;
-export const BLADE_BANDS: Band[] = [
-  [ROTOR_RADIUS - FIELD, ROTOR_RADIUS + 1], // tip field
-  [ROTOR_RADIUS - 3 * FIELD, ROTOR_RADIUS - 2 * FIELD],
-];
-export const bladeLivery = bandedMaterialHook(BLADE_BANDS, "livery-blade");
-

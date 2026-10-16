@@ -24,7 +24,7 @@ import { GeneratorRotor, GeneratorStatic } from "./turbine/GeneratorInternals";
 import { fitDistance } from "./turbine/framing";
 import { latheAlongZ } from "./turbine/geometry";
 import InfoPanel from "./turbine/InfoPanel";
-import { bladeLivery, nacelleLivery } from "./turbine/livery";
+import { nacelleLivery } from "./turbine/livery";
 import { CalloutLayer, type AnchorId, type CalloutRegistry, type CalloutSpec } from "./turbine/Callouts";
 import { HoverLabel, InteractionProvider, Part, useInteraction, type InteractionState } from "./turbine/interaction";
 import { NacelleInterior, YawSystem } from "./turbine/NacelleInterior";
@@ -415,8 +415,6 @@ function TurbineModel({
                     <mesh geometry={geo.blade} castShadow>
                       <meshStandardMaterial
                         ref={i === 0 ? inspectedBladeMatRef : undefined}
-                        onBeforeCompile={bladeLivery.onBeforeCompile}
-                        customProgramCacheKey={bladeLivery.customProgramCacheKey}
                         color="#f2f3f4"
                         roughness={0.42}
                         metalness={0.02}
