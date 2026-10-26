@@ -16,8 +16,11 @@ export const DEMO_STEPS: DemoStep[] = ORDER.flatMap((part) => [part, ...OPEN_CHI
 /** Overview pause, and the time the camera needs to fly to a new view. */
 const OVERVIEW_MS = 12_000;
 const FLIGHT_MS = 2_000;
-/** Comfortable reading speed for a public screen (characters per second). */
-const READ_CPS = 14;
+/** Pace at which the panel text is given time on screen (characters per second). */
+const READ_CPS = 28;
+/** Time on each part, after the flight. */
+const MIN_READ_MS = 2_500;
+const MAX_READ_MS = 7_000;
 
 /** How long to stay on a step: the flight, then the time to read what the panel shows. */
 export function demoDwellMs(step: DemoStep): number {
@@ -25,5 +28,5 @@ export function demoDwellMs(step: DemoStep): number {
   const info = PART_INFO[step];
   const text = info.opens ? `${info.name} ${info.intro ?? info.description}` : `${info.name} ${info.description}`;
   const read = (text.length / READ_CPS) * 1000;
-  return FLIGHT_MS + Math.min(16_000, Math.max(6_000, read));
+  return FLIGHT_MS + Math.min(MAX_READ_MS, Math.max(MIN_READ_MS, read));
 }

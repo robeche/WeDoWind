@@ -42,7 +42,7 @@ npm run start
 
 After 30 s without any input on the live 3D view (touch, mouse, keyboard or wheel), the kiosk starts
 a guided tour: it opens the tower, nacelle, generator, hub and blades in turn and selects every
-component inside each one, staying on each long enough to read its panel (6–16 s depending on the
+component inside each one, staying on each for 4.5–9 s (2 s camera flight plus time scaled to its panel
 text), with the overview in between. A "Guided tour · touch the screen to explore yourself" badge is
 shown, and the first input ends it. The data tabs are not part of the tour; they return to the live
 view after 3 minutes without input, as before. Tour order and timing: `src/components/turbine/demoTour.ts`;
