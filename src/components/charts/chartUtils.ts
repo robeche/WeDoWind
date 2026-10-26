@@ -1,16 +1,18 @@
 /** Shared helpers for the small SVG / canvas charts (dark kiosk theme). */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 /** Categorical slots for the dark surface (validated: CVD ΔE ≥ 9.4, contrast ≥ 3:1 on #0f172a). */
 export const SERIES = ["#3987e5", "#d95926", "#199e70"] as const;
 
-/** Measure an element's content box (CSS px) and follow resizes. */
+/**
+ * Measure an element's content box (CSS px) and follow resizes. Returns a callback ref, so the
+ * measurement follows the element even when it is re-mounted (e.g. moved into the enlarged view).
+ */
 export function useSize<T extends HTMLElement>() {
-  const ref = useRef<T>(null);
+  const [el, setEl] = useState<T | null>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
   useEffect(() => {
-    const el = ref.current;
     if (!el) return;
     const ro = new ResizeObserver(([entry]) => {
       const { width, height } = entry.contentRect;
@@ -18,8 +20,8 @@ export function useSize<T extends HTMLElement>() {
     });
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
-  return [ref, size] as const;
+  }, [el]);
+  return [setEl, size, el] as const;
 }
 
 /** "Nice" axis ticks covering [min, max]. */

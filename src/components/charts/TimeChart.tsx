@@ -3,11 +3,18 @@
 /**
  * Time-series chart (SVG, one y-axis): 2 px lines, optional min–max band per series, recessive
  * grid, and a crosshair that snaps to the nearest sample. The hover time is shared through
- * `hoverT` / `onHover`, so every chart in a tab shows the same instant.
+ * `hoverT` / `onHover`, and the zoomed time range through `view` / `onView`, so every chart in a
+ * tab shows the same instant and the same stretch of time.
+ *
+ * Zoom: wheel / pinch around the pointer, drag to pan, double-click (or the button) to reset.
+ * The y-axis refits to the visible data.
  */
 
-import { useMemo } from "react";
+import { useId, useMemo, useRef, useState } from "react";
+import ChartFrame from "./ChartFrame";
+import type { ChartExplanation } from "./chartInfo";
 import { axisTime, formatNumber, nearestIndex, niceTicks, tooltipTime, useSize } from "./chartUtils";
+import { panRange, useZoomGestures, zoomRange } from "./useZoomGestures";
 
 export interface TimeSeriesSpec {
   name: string;
@@ -32,7 +39,24 @@ interface Props {
   yTickLabel?: (v: number) => string;
   hoverT: number | null;
   onHover: (t: number | null) => void;
+  /** Visible time range (ms), `null` = everything. Uncontrolled when `onView` is omitted. */
+  view?: [number, number] | null;
+  onView?: (v: [number, number] | null) => void;
+  /** Explanation shown from the ⓘ button and in the enlarged view. */
+  info?: ChartExplanation;
   className?: string;
+}
+
+/** Index of the first sample with t >= value (array sorted ascending). */
+function lowerBound(t: number[], value: number): number {
+  let lo = 0;
+  let hi = t.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (t[mid] < value) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
 }
 
 const PAD = { top: 10, right: 14, bottom: 26, left: 52 };
@@ -130,9 +154,15 @@ export default function TimeChart({
   yTickLabel,
   hoverT,
   onHover,
+  view: viewProp,
+  onView,
+  info,
   className = "",
 }: Props) {
-  const [ref, size] = useSize<HTMLDivElement>();
+  const [ref, size, plotEl] = useSize<HTMLDivElement>();
+  const [localView, setLocalView] = useState<[number, number] | null>(null);
+  const view = onView ? (viewProp ?? null) : localView;
+  const setView = onView ?? setLocalView;
   const W = size.width;
   const H = size.height;
   const innerW = Math.max(1, W - PAD.left - PAD.right);
@@ -140,17 +170,26 @@ export default function TimeChart({
 
   const model = useMemo(() => {
     if (t.length < 2 || W < 10) return null;
-    const t0 = t[0];
-    const t1 = t[t.length - 1];
+    const full: [number, number] = [t[0], t[t.length - 1]];
+    // Zoomed range (ignored if it no longer overlaps the data, e.g. after a new time window).
+    const v = view && view[1] > full[0] && view[0] < full[1] ? view : null;
+    const t0 = v ? Math.max(full[0], v[0]) : full[0];
+    const t1 = v ? Math.min(full[1], v[1]) : full[1];
+    // Visible samples, plus one either side so lines run to the edges.
+    const i0 = Math.max(0, lowerBound(t, t0) - 1);
+    const i1 = Math.min(t.length, lowerBound(t, t1) + 1);
+    const tv = t.slice(i0, i1);
+    const cut = (arr: Array<number | null>) => arr.slice(i0, i1);
     let lo = Infinity;
     let hi = -Infinity;
     for (const s of series) {
       for (const arr of [s.values, s.band?.min, s.band?.max]) {
         if (!arr) continue;
-        for (const v of arr) {
-          if (v === null) continue;
-          if (v < lo) lo = v;
-          if (v > hi) hi = v;
+        for (let k = i0; k < i1; k++) {
+          const x = arr[k];
+          if (x === null || t[k] < t0 || t[k] > t1) continue;
+          if (x < lo) lo = x;
+          if (x > hi) hi = x;
         }
       }
     }
@@ -165,16 +204,40 @@ export default function TimeChart({
     return {
       t0,
       t1,
+      full,
+      zoomed: v !== null,
       x,
       y,
-      yTicks: ticks.filter((v) => v >= d0 - 1e-9 && v <= d1 + 1e-9),
+      yTicks: ticks.filter((tick) => tick >= d0 - 1e-9 && tick <= d1 + 1e-9),
       xTicks,
       paths: series.map((s) => ({
-        line: linePath(t, s.values, x, y, innerW),
-        band: s.band ? bandPath(t, s.band.min, s.band.max, x, y, innerW) : null,
+        line: linePath(tv, cut(s.values), x, y, innerW),
+        band: s.band ? bandPath(tv, cut(s.band.min), cut(s.band.max), x, y, innerW) : null,
       })),
     };
-  }, [t, series, W, innerW, innerH, yDomain, zeroBased, fixedTicks]);
+  }, [t, series, W, innerW, innerH, yDomain, zeroBased, fixedTicks, view]);
+
+  // Latest requested range: several gesture events can arrive before the next render.
+  const viewRef = useRef<[number, number] | null>(null);
+  viewRef.current = model?.zoomed ? [model.t0, model.t1] : null;
+  const apply = (v: [number, number] | null) => {
+    viewRef.current = v;
+    setView(v);
+  };
+  const busyRef = useZoomGestures(plotEl, {
+    onZoom: (factor, px) => {
+      if (!model) return;
+      const minSpan = Math.max(20 * resolutionSeconds * 1000, 60_000);
+      apply(zoomRange(model.full, viewRef.current, factor, (px - PAD.left) / innerW, minSpan));
+    },
+    onPan: (dx) => {
+      const cur = viewRef.current;
+      if (!model || !cur) return;
+      onHover(null);
+      apply(panRange(model.full, cur, (-dx / innerW) * (cur[1] - cur[0])));
+    },
+    onReset: () => apply(null),
+  });
 
   const hover = useMemo(() => {
     if (!model || hoverT === null || hoverT < model.t0 || hoverT > model.t1) return null;
@@ -183,13 +246,14 @@ export default function TimeChart({
   }, [model, hoverT, t]);
 
   const onMove = (e: React.PointerEvent<SVGSVGElement>) => {
-    if (!model) return;
+    if (!model || busyRef.current) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const px = e.clientX - rect.left;
     if (px < PAD.left || px > W - PAD.right) return onHover(null);
     onHover(model.t0 + ((px - PAD.left) / innerW) * (model.t1 - model.t0));
   };
 
+  const clipId = `clip-${useId().replace(/:/g, "")}`;
   const span = model ? model.t1 - model.t0 : 0;
   // Enough decimals to tell neighbouring ticks apart (e.g. 49.9 / 50.0 / 50.1 Hz).
   const tickStep = model && model.yTicks.length > 1 ? Math.abs(model.yTicks[1] - model.yTicks[0]) : 1;
@@ -197,23 +261,28 @@ export default function TimeChart({
   const label = yTickLabel ?? ((v: number) => formatNumber(v, tickDigits));
 
   return (
-    <figure className={`flex min-h-0 flex-col rounded-2xl bg-white/[0.04] p-[1.4vh] ring-1 ring-white/10 ${className}`}>
-      <figcaption className="flex items-baseline justify-between gap-3">
-        <span className="text-[clamp(0.85rem,1.8vh,1.35rem)] font-semibold text-white/85">
+    <ChartFrame
+      className={className}
+      info={info}
+      zoomed={!!model?.zoomed}
+      onResetZoom={() => setView(null)}
+      title={
+        <>
           {title} <span className="font-normal text-white/50">({unit})</span>
-        </span>
-        {series.length > 1 && (
-          <span className="flex gap-3 text-[clamp(0.7rem,1.5vh,1.1rem)] text-white/65">
-            {series.map((s) => (
+        </>
+      }
+      legend={
+        series.length > 1
+          ? series.map((s) => (
               <span key={s.name} className="flex items-center gap-1.5">
                 <span className="inline-block h-0.5 w-4 rounded" style={{ background: s.color }} />
                 {s.name}
               </span>
-            ))}
-          </span>
-        )}
-      </figcaption>
-      <div ref={ref} className="relative mt-[0.6vh] min-h-0 flex-1">
+            ))
+          : undefined
+      }
+    >
+      <div ref={ref} className="relative min-h-0 flex-1 touch-none">
         {model && (
           <svg
             width={W}
@@ -244,12 +313,17 @@ export default function TimeChart({
                 {axisTime(v, span)}
               </text>
             ))}
-            {series.map((s, k) =>
-              model.paths[k].band ? <path key={`b${k}`} d={model.paths[k].band!} fill={s.color} fillOpacity={0.22} /> : null,
-            )}
-            {series.map((s, k) => (
-              <path key={`l${k}`} d={model.paths[k].line} fill="none" stroke={s.color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
-            ))}
+            <clipPath id={clipId}>
+              <rect x={PAD.left} y={0} width={innerW} height={H} />
+            </clipPath>
+            <g clipPath={`url(#${clipId})`}>
+              {series.map((s, k) =>
+                model.paths[k].band ? <path key={`b${k}`} d={model.paths[k].band!} fill={s.color} fillOpacity={0.22} /> : null,
+              )}
+              {series.map((s, k) => (
+                <path key={`l${k}`} d={model.paths[k].line} fill="none" stroke={s.color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+              ))}
+            </g>
             {hover && (
               <g pointerEvents="none">
                 <line x1={hover.px} x2={hover.px} y1={PAD.top} y2={PAD.top + innerH} stroke="white" strokeOpacity={0.45} />
@@ -290,6 +364,6 @@ export default function TimeChart({
         )}
         {!model && <div className="absolute inset-0 grid place-items-center text-white/40">No data for this period</div>}
       </div>
-    </figure>
+    </ChartFrame>
   );
 }

@@ -31,6 +31,7 @@ import { NacelleInterior, YawSystem } from "./turbine/NacelleInterior";
 import { PART_INFO, TOWER_OPEN_FOCUS, type Focus, type OpenableId, type PartId } from "./turbine/parts";
 import TowerInterior from "./turbine/TowerInterior";
 import SiteSplat from "./turbine/SiteSplat";
+import { DEMO_STEPS, demoDwellMs } from "./turbine/demoTour";
 import { SignalLayer, SignalProjector, type FreeArea, type SignalRegistry } from "./turbine/SignalOverlay";
 import { overviewSignalGroups, signalGroups } from "./turbine/signals";
 import GridFlow from "./turbine/GridFlow";
@@ -77,9 +78,11 @@ export interface Turbine3DProps {
   callouts?: CalloutSpec[];
   /** Show the photogrammetric site (Gaussian splat of the real surroundings). Default true. */
   site?: boolean;
+  /** Self-running tour of every component (kiosk demo mode). Any visitor input should end it. */
+  demo?: boolean;
 }
 
-type LiveInputs = Omit<Turbine3DProps, "className" | "onExploringChange" | "compact" | "callouts" | "site">;
+type LiveInputs = Omit<Turbine3DProps, "className" | "onExploringChange" | "compact" | "callouts" | "site" | "demo">;
 
 /* ------------------------------------------------------------------ */
 /* Procedural geometry                                                 */
@@ -950,6 +953,7 @@ export default function Turbine3D({
   compact = false,
   callouts,
   site = true,
+  demo = false,
   ...props
 }: Turbine3DProps) {
   const calloutRegistry = useRef<CalloutRegistry>(new Map());
@@ -1054,6 +1058,24 @@ export default function Turbine3D({
     }, 5_000);
     return () => clearInterval(id);
   }, [openPart, selectedId, close]);
+
+  // Demo mode: walk through every component, pausing on each long enough to read its panel.
+  // It starts from the overview; when the demo ends the current view simply stays.
+  useEffect(() => {
+    if (!demo) return;
+    let step = 0;
+    let timer: ReturnType<typeof setTimeout>;
+    const next = () => {
+      const s = DEMO_STEPS[step % DEMO_STEPS.length];
+      step++;
+      if (s === null) close();
+      else select(s);
+      timer = setTimeout(next, demoDwellMs(s));
+    };
+    close();
+    timer = setTimeout(next, demoDwellMs(null));
+    return () => clearTimeout(timer);
+  }, [demo, select, close]);
 
   // Recover from a lost GPU context (driver reset, sleep/wake) by remounting the canvas.
   const onCreated = useCallback(({ gl }: RootState) => {

@@ -38,6 +38,24 @@ npm run build
 npm run start
 ```
 
+## Demo mode
+
+After 30 s without any input on the live 3D view (touch, mouse, keyboard or wheel), the kiosk starts
+a guided tour: it opens the tower, nacelle, generator, hub and blades in turn and selects every
+component inside each one, staying on each long enough to read its panel (6–16 s depending on the
+text), with the overview in between. A "Guided tour · touch the screen to explore yourself" badge is
+shown, and the first input ends it. The data tabs are not part of the tour; they return to the live
+view after 3 minutes without input, as before. Tour order and timing: `src/components/turbine/demoTour.ts`;
+idle time: `DEMO_IDLE_MS` in `src/app/page.tsx`.
+
+## Charts
+
+Every chart in the "Last hours" and "10-min statistics" tabs can be zoomed (mouse wheel or pinch,
+drag to move, double-click or the ↺ button to reset); on time charts the zoom is shared by all the
+charts of the tab, like the hover readout. The ⓘ button explains each figure (what it shows, why it
+matters, what to look for) and ⤢ opens it full screen with the explanation alongside. Texts:
+`src/components/charts/chartInfo.ts`.
+
 ## Static build (GitHub Pages)
 
 The kiosk can also run with no server at all, e.g. on GitHub Pages:

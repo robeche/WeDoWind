@@ -3,10 +3,16 @@
 /**
  * Scatter plot drawn on a canvas (thousands of 10-minute points), with SVG axes and a
  * nearest-point hover readout (the pointer only has to be closest, within 24 px).
+ * Zoom on both axes: wheel / pinch around the pointer, drag to pan, double-click to reset.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import ChartFrame from "./ChartFrame";
+import type { ChartExplanation } from "./chartInfo";
 import { formatNumber, niceTicks, useSize } from "./chartUtils";
+import { panRange, useZoomGestures, zoomRange } from "./useZoomGestures";
+
+type Range = [number, number];
 
 interface Props {
   title: string;
@@ -22,6 +28,7 @@ interface Props {
   /** Optional reference line drawn over the points (e.g. the binned median curve). */
   reference?: Array<[number, number]>;
   referenceName?: string;
+  info?: ChartExplanation;
   className?: string;
 }
 
@@ -40,11 +47,13 @@ export default function ScatterChart({
   describe,
   reference,
   referenceName,
+  info,
   className = "",
 }: Props) {
-  const [ref, size] = useSize<HTMLDivElement>();
+  const [ref, size, plotEl] = useSize<HTMLDivElement>();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [hover, setHover] = useState<number | null>(null);
+  const [view, setView] = useState<{ x: Range; y: Range } | null>(null);
   const W = size.width;
   const H = size.height;
   const innerW = Math.max(1, W - PAD.left - PAD.right);
@@ -61,14 +70,48 @@ export default function ScatterChart({
       count++;
     }
     if (!count || W < 10) return null;
-    const xTicks = niceTicks(0, xMax, 5);
-    const yTicks = niceTicks(0, yMax, 4);
-    const X1 = xTicks[xTicks.length - 1];
-    const Y1 = yTicks[yTicks.length - 1];
-    const sx = (v: number) => PAD.left + (v / X1) * innerW;
-    const sy = (v: number) => PAD.top + innerH - (v / Y1) * innerH;
-    return { xTicks, yTicks, sx, sy, count };
-  }, [x, y, W, innerW, innerH]);
+    const fullX = niceTicks(0, xMax, 5);
+    const fullY = niceTicks(0, yMax, 4);
+    const full = { x: [0, fullX[fullX.length - 1]] as Range, y: [0, fullY[fullY.length - 1]] as Range };
+    const vx = view?.x ?? full.x;
+    const vy = view?.y ?? full.y;
+    const inside = (t: number, r: Range) => t >= r[0] - 1e-9 && t <= r[1] + 1e-9;
+    const xTicks = view ? niceTicks(vx[0], vx[1], 5).filter((t) => inside(t, vx)) : fullX;
+    const yTicks = view ? niceTicks(vy[0], vy[1], 4).filter((t) => inside(t, vy)) : fullY;
+    const sx = (v: number) => PAD.left + ((v - vx[0]) / (vx[1] - vx[0])) * innerW;
+    const sy = (v: number) => PAD.top + innerH - ((v - vy[0]) / (vy[1] - vy[0])) * innerH;
+    // Enough decimals to tell neighbouring ticks apart once zoomed in.
+    const digitsFor = (ticks: number[]) =>
+      ticks.length > 1 ? Math.max(0, Math.min(3, -Math.floor(Math.log10(Math.abs(ticks[1] - ticks[0])) + 1e-9))) : 0;
+    return { xTicks, yTicks, sx, sy, count, full, vx, vy, xTickDigits: digitsFor(xTicks), yTickDigits: digitsFor(yTicks) };
+  }, [x, y, W, innerW, innerH, view]);
+
+  // Latest requested view: several gesture events can arrive before the next render.
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  const apply = (v: { x: Range; y: Range } | null) => {
+    viewRef.current = v;
+    setView(v);
+  };
+  const busyRef = useZoomGestures(plotEl, {
+    onZoom: (factor, px, py) => {
+      if (!model) return;
+      const cur = viewRef.current;
+      const nx = zoomRange(model.full.x, cur?.x ?? null, factor, (px - PAD.left) / innerW, (model.full.x[1] - model.full.x[0]) / 40);
+      const ny = zoomRange(model.full.y, cur?.y ?? null, factor, 1 - (py - PAD.top) / innerH, (model.full.y[1] - model.full.y[0]) / 40);
+      apply(nx || ny ? { x: nx ?? model.full.x, y: ny ?? model.full.y } : null);
+    },
+    onPan: (dx, dy) => {
+      const cur = viewRef.current;
+      if (!model || !cur) return;
+      setHover(null);
+      apply({
+        x: panRange(model.full.x, cur.x, (-dx / innerW) * (cur.x[1] - cur.x[0])) ?? cur.x,
+        y: panRange(model.full.y, cur.y, (dy / innerH) * (cur.y[1] - cur.y[0])) ?? cur.y,
+      });
+    },
+    onReset: () => apply(null),
+  });
 
   useEffect(() => {
     const c = canvasRef.current;
@@ -79,6 +122,10 @@ export default function ScatterChart({
     const ctx = c.getContext("2d")!;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, W, H);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(PAD.left, PAD.top, innerW, innerH);
+    ctx.clip();
     // Dense data: small, translucent dots so overlaps read as density.
     const r = model.count > 3000 ? 1.6 : 2.4;
     ctx.fillStyle = color;
@@ -90,17 +137,20 @@ export default function ScatterChart({
       ctx.fill();
     }
     ctx.globalAlpha = 1;
-  }, [model, x, y, color, W, H]);
+    ctx.restore();
+  }, [model, x, y, color, W, H, innerW, innerH]);
 
   const onMove = (e: React.PointerEvent<SVGSVGElement>) => {
-    if (!model) return;
+    if (!model || busyRef.current) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const px = e.clientX - rect.left;
     const py = e.clientY - rect.top;
+    if (px < PAD.left || px > PAD.left + innerW || py < PAD.top || py > PAD.top + innerH) return setHover(null);
     let best = -1;
     let bestD = HIT_RADIUS * HIT_RADIUS;
     for (let i = 0; i < x.length; i++) {
       if (x[i] === null || y[i] === null) continue;
+      if ((x[i] as number) < model.vx[0] || (x[i] as number) > model.vx[1] || (y[i] as number) < model.vy[0] || (y[i] as number) > model.vy[1]) continue;
       const dx = model.sx(x[i] as number) - px;
       const dy = model.sy(y[i] as number) - py;
       const d = dx * dx + dy * dy;
@@ -112,17 +162,22 @@ export default function ScatterChart({
     setHover(best >= 0 ? best : null);
   };
 
+  const clipId = `clip-${useId().replace(/:/g, "")}`;
   const refPath =
     model && reference?.length
       ? reference.map(([a, b], k) => `${k ? "L" : "M"}${model.sx(a).toFixed(1)},${model.sy(b).toFixed(1)}`).join("")
       : null;
 
   return (
-    <figure className={`flex min-h-0 flex-col rounded-2xl bg-white/[0.04] p-[1.4vh] ring-1 ring-white/10 ${className}`}>
-      <figcaption className="flex items-baseline justify-between gap-3">
-        <span className="text-[clamp(0.85rem,1.8vh,1.35rem)] font-semibold text-white/85">{title}</span>
-        {refPath && referenceName && (
-          <span className="flex gap-3 text-[clamp(0.7rem,1.5vh,1.1rem)] text-white/65">
+    <ChartFrame
+      className={className}
+      info={info}
+      zoomed={view !== null}
+      onResetZoom={() => apply(null)}
+      title={title}
+      legend={
+        refPath && referenceName ? (
+          <>
             <span className="flex items-center gap-1.5">
               <span className="inline-block size-2 rounded-full" style={{ background: color }} />
               10-minute means
@@ -131,10 +186,11 @@ export default function ScatterChart({
               <span className="inline-block h-0.5 w-4 rounded bg-white" />
               {referenceName}
             </span>
-          </span>
-        )}
-      </figcaption>
-      <div ref={ref} className="relative mt-[0.6vh] min-h-0 flex-1">
+          </>
+        ) : undefined
+      }
+    >
+      <div ref={ref} className="relative min-h-0 flex-1 touch-none">
         <canvas ref={canvasRef} className="absolute inset-0" style={{ width: W, height: H }} />
         {model && (
           <svg
@@ -151,13 +207,13 @@ export default function ScatterChart({
               <g key={`y${v}`}>
                 <line x1={PAD.left} x2={W - PAD.right} y1={model.sy(v)} y2={model.sy(v)} stroke="white" strokeOpacity={0.08} />
                 <text x={PAD.left - 8} y={model.sy(v)} dy="0.32em" textAnchor="end" className="fill-white/50 text-[11px] tabular-nums">
-                  {formatNumber(v)}
+                  {formatNumber(v, model.yTickDigits)}
                 </text>
               </g>
             ))}
             {model.xTicks.map((v) => (
               <text key={`x${v}`} x={model.sx(v)} y={PAD.top + innerH + 16} textAnchor="middle" className="fill-white/50 text-[11px] tabular-nums">
-                {formatNumber(v)}
+                {formatNumber(v, model.xTickDigits)}
               </text>
             ))}
             <text x={PAD.left + innerW / 2} y={H - 2} textAnchor="middle" className="fill-white/55 text-[11px]">
@@ -166,7 +222,10 @@ export default function ScatterChart({
             <text transform={`translate(12 ${PAD.top + innerH / 2}) rotate(-90)`} textAnchor="middle" className="fill-white/55 text-[11px]">
               {yLabel}
             </text>
-            {refPath && <path d={refPath} fill="none" stroke="#ffffff" strokeWidth={2} strokeOpacity={0.9} />}
+            <clipPath id={clipId}>
+              <rect x={PAD.left} y={PAD.top} width={innerW} height={innerH} />
+            </clipPath>
+            {refPath && <path d={refPath} clipPath={`url(#${clipId})`} fill="none" stroke="#ffffff" strokeWidth={2} strokeOpacity={0.9} />}
             {hover !== null && (
               <circle cx={model.sx(x[hover] as number)} cy={model.sy(y[hover] as number)} r={5} fill={color} stroke="#ffffff" strokeWidth={2} />
             )}
@@ -191,6 +250,6 @@ export default function ScatterChart({
         )}
         {!model && <div className="absolute inset-0 grid place-items-center text-white/40">No data for this period</div>}
       </div>
-    </figure>
+    </ChartFrame>
   );
 }

@@ -5,6 +5,7 @@
 import { useMemo, useState } from "react";
 import { useTrends } from "@/hooks/useTurbineData";
 import TimeChart from "@/components/charts/TimeChart";
+import { CHART_INFO } from "@/components/charts/chartInfo";
 import { SERIES, formatNumber } from "@/components/charts/chartUtils";
 import { AnalyticsFrame, RangePicker, StatTile } from "./AnalyticsShell";
 
@@ -27,8 +28,14 @@ function unwrapGaps(values: Array<number | null>): Array<number | null> {
 }
 
 export default function TrendsView({ active }: { active: boolean }) {
-  const [win, setWin] = useState<Win>("6h");
+  const [win, setWinState] = useState<Win>("6h");
   const [hoverT, setHoverT] = useState<number | null>(null);
+  // Zoomed time range, shared by all six charts (cleared with a new time window).
+  const [view, setView] = useState<[number, number] | null>(null);
+  const setWin = (w: Win) => {
+    setWinState(w);
+    setView(null);
+  };
   const q = useTrends(win, active);
   const d = q.data;
 
@@ -73,13 +80,15 @@ export default function TrendsView({ active }: { active: boolean }) {
 
   const status = !d ? (q.isError ? "error" : "loading") : q.isError ? "error" : q.isFetching ? "refreshing" : "ready";
   const res = d?.resolutionSeconds ?? 60;
-  const common = { t: d?.t ?? [], resolutionSeconds: res, hoverT, onHover: setHoverT };
+  const common = { t: d?.t ?? [], resolutionSeconds: res, hoverT, onHover: setHoverT, view, onView: setView };
 
   return (
     <AnalyticsFrame
       status={status}
       controls={<RangePicker label="Time window" options={WINDOWS} value={win} onChange={setWin} />}
-      note={d ? `${res === 1 ? "Every second" : "Every minute"} · ${d.t.length.toLocaleString("en-GB")} readings` : undefined}
+      note={
+        d ? `${res === 1 ? "Every second" : "Every minute"} · ${d.t.length.toLocaleString("en-GB")} readings · ⓘ explains each chart · scroll or pinch to zoom` : undefined
+      }
       tiles={
         <>
           <StatTile label="Energy produced" value={formatNumber(stats ? stats.energyKwh / 1000 : null, 2)} unit="MWh" />
@@ -97,9 +106,9 @@ export default function TrendsView({ active }: { active: boolean }) {
     >
       {charts && (
         <div className="grid min-h-0 flex-1 grid-cols-1 gap-[1.2vh] md:grid-cols-3 md:grid-rows-2 [&>*]:min-h-[240px] md:[&>*]:min-h-0">
-          <TimeChart title="Power" unit="kW" zeroBased series={charts.power} {...common} />
-          <TimeChart title="Wind speed" unit="m/s" digits={1} zeroBased series={charts.wind} {...common} />
-          <TimeChart title="Rotor speed" unit="rpm" digits={1} zeroBased series={charts.rotor} {...common} />
+          <TimeChart title="Power" unit="kW" zeroBased series={charts.power} info={CHART_INFO.trendPower} {...common} />
+          <TimeChart title="Wind speed" unit="m/s" digits={1} zeroBased series={charts.wind} info={CHART_INFO.trendWind} {...common} />
+          <TimeChart title="Rotor speed" unit="rpm" digits={1} zeroBased series={charts.rotor} info={CHART_INFO.trendRotor} {...common} />
           <TimeChart
             title="Direction"
             unit="° from north"
@@ -107,10 +116,11 @@ export default function TrendsView({ active }: { active: boolean }) {
             yTicks={COMPASS_TICKS}
             yTickLabel={compassLabel}
             series={charts.direction}
+            info={CHART_INFO.trendDirection}
             {...common}
           />
-          <TimeChart title="Reactive power" unit="kvar" series={charts.reactive} {...common} />
-          <TimeChart title="Grid frequency" unit="Hz" digits={2} series={charts.frequency} {...common} />
+          <TimeChart title="Reactive power" unit="kvar" series={charts.reactive} info={CHART_INFO.trendReactive} {...common} />
+          <TimeChart title="Grid frequency" unit="Hz" digits={2} series={charts.frequency} info={CHART_INFO.trendFrequency} {...common} />
         </div>
       )}
     </AnalyticsFrame>

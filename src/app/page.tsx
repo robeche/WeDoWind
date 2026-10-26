@@ -5,6 +5,7 @@ import { Maximize, Minimize, RefreshCw, Wind } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
 import { buildCallouts } from "@/components/FloatingSigns";
+import DemoBadge from "@/components/DemoBadge";
 import TabBar, { type KioskTab } from "@/components/TabBar";
 import StatsView from "@/components/analytics/StatsView";
 import TrendsView from "@/components/analytics/TrendsView";
@@ -12,7 +13,7 @@ import MessageTicker from "@/components/MessageTicker";
 import MobileKiosk from "@/components/MobileKiosk";
 import SafeBoundary from "@/components/SafeBoundary";
 import { useIsMobile } from "@/hooks/useIsMobile";
-import { useFullscreen, useIdleCursor, useKioskMaintenance, useNow } from "@/hooks/useKiosk";
+import { useDemoMode, useFullscreen, useIdleCursor, useKioskMaintenance, useNow } from "@/hooks/useKiosk";
 import { useLiveTurbine, useTurbineHistory } from "@/hooks/useTurbineData";
 import type { TurbineStatus } from "@/services/aceApi";
 import { COMMUNITY_FUND_GBP_PER_KWH, computeCommunityMetrics } from "@/utils/metrics";
@@ -51,6 +52,9 @@ export default function KioskPage() {
   // Phones get a full-screen turbine with the figures floating around it.
   const isMobile = useIsMobile();
   const [tab, setTab] = useKioskTab();
+  // Demo tour of the 3D twin after 30 s without input (only on the live view: the data tabs
+  // keep their own longer timeout back to the live view).
+  const demo = useDemoMode(DEMO_IDLE_MS, tab === "live");
 
   const metrics = useMemo(() => computeCommunityMetrics(live, history), [live, history]);
   const ready = live !== null;
@@ -74,6 +78,7 @@ export default function KioskPage() {
         lastUpdated={lastUpdated}
         tab={tab}
         onTabChange={setTab}
+        demo={demo}
       />
     );
   }
@@ -143,8 +148,11 @@ export default function KioskPage() {
             hasData={ready}
             snapshot={live}
             onExploringChange={setExploring}
+            demo={demo}
           />
         </SafeBoundary>
+
+        <DemoBadge active={demo} />
 
         <div
           className={`pointer-events-none absolute bottom-[2vh] left-1/2 flex -translate-x-1/2 flex-col items-center gap-2 transition-opacity duration-500 ${
@@ -205,6 +213,9 @@ export default function KioskPage() {
     </main>
   );
 }
+
+/** Idle time before the self-running demo starts. */
+const DEMO_IDLE_MS = 30_000;
 
 /** Kiosk tab state: falls back to the live 3D view after a few minutes without input. */
 const TAB_IDLE_MS = 3 * 60_000;

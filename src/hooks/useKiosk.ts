@@ -96,3 +96,32 @@ export function useKioskMaintenance(reloadAtUk = "04:00") {
     };
   }, [reloadAtUk]);
 }
+
+/**
+ * Demo mode: after `idleMs` without any visitor input (touch, mouse, keyboard, wheel) the kiosk
+ * starts its self-running tour; the first input ends it. Only counts while `enabled`.
+ */
+export function useDemoMode(idleMs = 30_000, enabled = true): boolean {
+  const [active, setActive] = useState(false);
+  useEffect(() => {
+    if (!enabled) {
+      setActive(false);
+      return;
+    }
+    let last = Date.now();
+    const touch = () => {
+      last = Date.now();
+      setActive(false);
+    };
+    const events = ["pointerdown", "pointermove", "keydown", "wheel", "touchstart"] as const;
+    events.forEach((e) => window.addEventListener(e, touch, { passive: true }));
+    const id = setInterval(() => {
+      if (Date.now() - last > idleMs) setActive(true);
+    }, 1_000);
+    return () => {
+      clearInterval(id);
+      events.forEach((e) => window.removeEventListener(e, touch));
+    };
+  }, [idleMs, enabled]);
+  return active;
+}

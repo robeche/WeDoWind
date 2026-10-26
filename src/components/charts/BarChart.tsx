@@ -1,9 +1,15 @@
 "use client";
 
-/** Vertical bar chart (SVG): rounded data-ends on the baseline, per-bar hover readout. */
+/**
+ * Vertical bar chart (SVG): rounded data-ends on the baseline, per-bar hover readout.
+ * Zoom along the bars: wheel / pinch, drag to pan, double-click to reset; the y-axis refits.
+ */
 
-import { useMemo, useState } from "react";
+import { useId, useMemo, useRef, useState } from "react";
+import ChartFrame from "./ChartFrame";
+import type { ChartExplanation } from "./chartInfo";
 import { formatNumber, niceTicks, useSize } from "./chartUtils";
+import { panRange, useZoomGestures, zoomRange } from "./useZoomGestures";
 
 export interface Bar {
   key: string;
@@ -19,14 +25,17 @@ interface Props {
   bars: Bar[];
   color: string;
   digits?: number;
+  info?: ChartExplanation;
   className?: string;
 }
 
 const PAD = { top: 10, right: 14, bottom: 26, left: 52 };
 
-export default function BarChart({ title, unit, bars, color, digits = 1, className = "" }: Props) {
-  const [ref, size] = useSize<HTMLDivElement>();
+export default function BarChart({ title, unit, bars, color, digits = 1, info, className = "" }: Props) {
+  const [ref, size, plotEl] = useSize<HTMLDivElement>();
   const [hover, setHover] = useState<number | null>(null);
+  /** Visible bar range in bar units: [first, last + 1). */
+  const [view, setView] = useState<[number, number] | null>(null);
   const W = size.width;
   const H = size.height;
   const innerW = Math.max(1, W - PAD.left - PAD.right);
@@ -34,22 +43,57 @@ export default function BarChart({ title, unit, bars, color, digits = 1, classNa
 
   const model = useMemo(() => {
     if (!bars.length || W < 10) return null;
-    const ticks = niceTicks(0, Math.max(...bars.map((b) => b.value), 0.001), 4);
+    const full: [number, number] = [0, bars.length];
+    const [a, b] = view && view[1] <= bars.length ? view : full;
+    const first = Math.max(0, Math.floor(a));
+    const last = Math.min(bars.length - 1, Math.ceil(b) - 1);
+    let maxV = 0.001;
+    for (let i = first; i <= last; i++) maxV = Math.max(maxV, bars[i].value);
+    const ticks = niceTicks(0, maxV, 4);
     const top = ticks[ticks.length - 1];
-    const slot = innerW / bars.length;
+    const slot = innerW / (b - a);
     const gap = Math.min(2, slot * 0.25); // 2 px surface gap between bars
     const y = (v: number) => PAD.top + innerH - (v / top) * innerH;
+    const left = (i: number) => PAD.left + (i - a) * slot;
     // Label every n-th bar so labels never collide.
-    const every = Math.max(1, Math.ceil(bars.length / Math.max(1, Math.floor(innerW / 64))));
-    return { ticks, slot, gap, y, every };
-  }, [bars, W, innerW, innerH]);
+    const every = Math.max(1, Math.ceil((b - a) / Math.max(1, Math.floor(innerW / 64))));
+    return { ticks, slot, gap, y, every, left, first, last, a, b, full, zoomed: view !== null && view[1] <= bars.length };
+  }, [bars, W, innerW, innerH, view]);
+
+  const viewRef = useRef(view);
+  viewRef.current = model?.zoomed ? [model.a, model.b] : null;
+  const apply = (v: [number, number] | null) => {
+    viewRef.current = v;
+    setView(v);
+  };
+  const busyRef = useZoomGestures(plotEl, {
+    onZoom: (factor, px) => {
+      if (!model) return;
+      apply(zoomRange(model.full, viewRef.current, factor, (px - PAD.left) / innerW, Math.min(5, bars.length)));
+    },
+    onPan: (dx) => {
+      const cur = viewRef.current;
+      if (!model || !cur) return;
+      setHover(null);
+      apply(panRange(model.full, cur, (-dx / innerW) * (cur[1] - cur[0])));
+    },
+    onReset: () => apply(null),
+  });
+  const clipId = `clip-${useId().replace(/:/g, "")}`;
 
   return (
-    <figure className={`flex min-h-0 flex-col rounded-2xl bg-white/[0.04] p-[1.4vh] ring-1 ring-white/10 ${className}`}>
-      <figcaption className="text-[clamp(0.85rem,1.8vh,1.35rem)] font-semibold text-white/85">
-        {title} <span className="font-normal text-white/50">({unit})</span>
-      </figcaption>
-      <div ref={ref} className="relative mt-[0.6vh] min-h-0 flex-1">
+    <ChartFrame
+      className={className}
+      info={info}
+      zoomed={!!model?.zoomed}
+      onResetZoom={() => apply(null)}
+      title={
+        <>
+          {title} <span className="font-normal text-white/50">({unit})</span>
+        </>
+      }
+    >
+      <div ref={ref} className="relative min-h-0 flex-1 touch-none">
         {model && (
           <svg width={W} height={H} className="absolute inset-0 select-none" role="img" aria-label={title} onPointerLeave={() => setHover(null)}>
             {model.ticks.map((v) => (
@@ -60,8 +104,13 @@ export default function BarChart({ title, unit, bars, color, digits = 1, classNa
                 </text>
               </g>
             ))}
+            <clipPath id={clipId}>
+              <rect x={PAD.left} y={0} width={innerW} height={H} />
+            </clipPath>
+            <g clipPath={`url(#${clipId})`}>
             {bars.map((b, i) => {
-              const x0 = PAD.left + i * model.slot + model.gap / 2;
+              if (i < model.first || i > model.last) return null;
+              const x0 = model.left(i) + model.gap / 2;
               const w = Math.max(1, model.slot - model.gap);
               const y0 = model.y(b.value);
               const h = PAD.top + innerH - y0;
@@ -76,15 +125,15 @@ export default function BarChart({ title, unit, bars, color, digits = 1, classNa
                   />
                   {/* Hit target: the whole column, larger than the bar. */}
                   <rect
-                    x={PAD.left + i * model.slot}
+                    x={model.left(i)}
                     y={PAD.top}
                     width={model.slot}
                     height={innerH}
                     fill="transparent"
-                    onPointerEnter={() => setHover(i)}
+                    onPointerEnter={() => !busyRef.current && setHover(i)}
                     onPointerDown={() => setHover(i)}
                   />
-                  {i % model.every === 0 && (
+                  {i % model.every === 0 && x0 + w / 2 > PAD.left + 20 && x0 + w / 2 < W - PAD.right - 20 && (
                     <text x={x0 + w / 2} y={H - 6} textAnchor="middle" className="fill-white/50 text-[11px]">
                       {b.label}
                     </text>
@@ -92,15 +141,14 @@ export default function BarChart({ title, unit, bars, color, digits = 1, classNa
                 </g>
               );
             })}
+            </g>
           </svg>
         )}
         {hover !== null && model && bars[hover] && (
           <div
             className="pointer-events-none absolute top-1 z-10 rounded-lg bg-slate-950/95 px-2.5 py-1.5 text-[clamp(0.7rem,1.4vh,1rem)] shadow-lg ring-1 ring-white/15"
             style={
-              PAD.left + (hover + 0.5) * model.slot > W / 2
-                ? { right: W - (PAD.left + hover * model.slot) + 6 }
-                : { left: PAD.left + (hover + 1) * model.slot + 6 }
+              model.left(hover + 0.5) > W / 2 ? { right: W - model.left(hover) + 6 } : { left: model.left(hover + 1) + 6 }
             }
           >
             <div className="text-white/55">{bars[hover].label}</div>
@@ -112,6 +160,6 @@ export default function BarChart({ title, unit, bars, color, digits = 1, classNa
         )}
         {!model && <div className="absolute inset-0 grid place-items-center text-white/40">No data for this period</div>}
       </div>
-    </figure>
+    </ChartFrame>
   );
 }

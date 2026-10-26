@@ -11,6 +11,7 @@ import { RefreshCw, Wind } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useState } from "react";
 import MessageTicker from "@/components/MessageTicker";
+import DemoBadge from "@/components/DemoBadge";
 import SafeBoundary from "@/components/SafeBoundary";
 import { buildCallouts } from "@/components/FloatingSigns";
 import TabBar, { type KioskTab } from "@/components/TabBar";
@@ -40,6 +41,8 @@ export interface MobileKioskProps {
   lastUpdated: number | null;
   tab: KioskTab;
   onTabChange: (t: KioskTab) => void;
+  /** Self-running tour of the 3D twin (see useDemoMode). */
+  demo?: boolean;
 }
 
 /* ------------------------------------------------------------------ */
@@ -57,6 +60,7 @@ export default function MobileKiosk({
   lastUpdated,
   tab,
   onTabChange,
+  demo = false,
 }: MobileKioskProps) {
   const [exploring, setExploring] = useState(false);
   const ready = live !== null;
@@ -86,8 +90,11 @@ export default function MobileKiosk({
           hasData={ready}
           snapshot={live}
           onExploringChange={setExploring}
+          demo={demo}
         />
       </SafeBoundary>
+
+      <DemoBadge active={demo} compact />
 
       {/* Header */}
       <header className="pointer-events-none absolute inset-x-0 top-0 bg-gradient-to-b from-slate-950/85 via-slate-950/50 to-transparent px-3 pb-6 pt-[max(0.75rem,env(safe-area-inset-top))]">

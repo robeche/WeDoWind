@@ -8,6 +8,7 @@ import { RATED_POWER_KW as RATED_KW } from "@/services/aceApi";
 import BarChart from "@/components/charts/BarChart";
 import ScatterChart from "@/components/charts/ScatterChart";
 import TimeChart from "@/components/charts/TimeChart";
+import { CHART_INFO } from "@/components/charts/chartInfo";
 import { SERIES, formatDay, formatNumber, tooltipTime } from "@/components/charts/chartUtils";
 import { AnalyticsFrame, RangePicker, StatTile } from "./AnalyticsShell";
 
@@ -39,8 +40,14 @@ function medianCurve(wind: Array<number | null>, power: Array<number | null>): A
 }
 
 export default function StatsView({ active }: { active: boolean }) {
-  const [days, setDays] = useState<Days>(30);
+  const [days, setDaysState] = useState<Days>(30);
   const [hoverT, setHoverT] = useState<number | null>(null);
+  // Zoomed time range, shared by the four time charts (cleared with a new period).
+  const [view, setView] = useState<[number, number] | null>(null);
+  const setDays = (v: Days) => {
+    setDaysState(v);
+    setView(null);
+  };
   const q = useStats(days, active);
   const d = q.data;
 
@@ -111,7 +118,7 @@ export default function StatsView({ active }: { active: boolean }) {
   }, [d]);
 
   const status = !d ? (q.isError ? "error" : "loading") : q.isError ? "error" : q.isFetching ? "refreshing" : "ready";
-  const common = { t: d?.t ?? [], resolutionSeconds: 600, hoverT, onHover: setHoverT };
+  const common = { t: d?.t ?? [], resolutionSeconds: 600, hoverT, onHover: setHoverT, view, onView: setView };
   const span = d && d.t.length ? d.t[d.t.length - 1] - d.t[0] : 0;
   const coverageNote =
     derived?.firstDay && d && d.t.length && d.t[0] - Date.parse(d.from) > 86_400_000
@@ -126,7 +133,7 @@ export default function StatsView({ active }: { active: boolean }) {
         d ? (
           <>
             10-minute statistics · {d.t.length.toLocaleString("en-GB")} records
-            {coverageNote && <> · {coverageNote}</>}
+            {coverageNote && <> · {coverageNote}</>} · ⓘ explains each chart · scroll or pinch to zoom
           </>
         ) : undefined
       }
@@ -162,12 +169,13 @@ export default function StatsView({ active }: { active: boolean }) {
             reference={derived.curve}
             referenceName="Median"
             describe={(i) => tooltipTime(d.t[i], span, 600)}
+            info={CHART_INFO.powerCurve}
           />
-          <BarChart title="Energy per day" unit="MWh" bars={derived.bars} color={SERIES[0]} />
-          <TimeChart title="Generator temperatures" unit="°C" series={derived.temps} {...common} />
-          <TimeChart title="Power, with 10-min min–max" unit="kW" zeroBased series={derived.power} {...common} />
-          <TimeChart title="Wind speed, with 10-min min–max" unit="m/s" digits={1} zeroBased series={derived.wind} {...common} />
-          <TimeChart title="Blade pitch angle" unit="°" digits={1} series={derived.blade} {...common} />
+          <BarChart title="Energy per day" unit="MWh" bars={derived.bars} color={SERIES[0]} info={CHART_INFO.dailyEnergy} />
+          <TimeChart title="Generator temperatures" unit="°C" series={derived.temps} info={CHART_INFO.generatorTemps} {...common} />
+          <TimeChart title="Power, with 10-min min–max" unit="kW" zeroBased series={derived.power} info={CHART_INFO.powerBand} {...common} />
+          <TimeChart title="Wind speed, with 10-min min–max" unit="m/s" digits={1} zeroBased series={derived.wind} info={CHART_INFO.windBand} {...common} />
+          <TimeChart title="Blade pitch angle" unit="°" digits={1} series={derived.blade} info={CHART_INFO.bladePitch} {...common} />
         </div>
       )}
     </AnalyticsFrame>
