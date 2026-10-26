@@ -12,6 +12,7 @@ import { Info } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 export const COMMUNITY_MESSAGES = [
+  "Owned by the community · Ambition Community Energy & Ambition Lawrence Weston.",
   "Did you know? This 4.2 MW turbine is community-owned by Lawrence Weston.",
   "Surplus income from this turbine goes to Ambition Lawrence Weston for projects in the local community.",
   "The blades on this screen turn at exactly the same speed as the real turbine — right now.",

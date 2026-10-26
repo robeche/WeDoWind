@@ -116,9 +116,6 @@ export default function KioskPage() {
             <FitText as="h1" minScale={0} minPx={15} wrap className="text-[clamp(1.5rem,4vh,3.4rem)] font-extrabold leading-tight">
               Lawrence Weston Community Wind Turbine
             </FitText>
-            <p className="hidden truncate text-[clamp(0.9rem,2.1vh,1.7rem)] text-white/70 xl:block">
-              Owned by the community · Ambition Community Energy &amp; Ambition Lawrence Weston
-            </p>
           </div>
         </div>
 
