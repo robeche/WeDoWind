@@ -6,15 +6,15 @@
  * `hoverT` / `onHover`, and the zoomed time range through `view` / `onView`, so every chart in a
  * tab shows the same instant and the same stretch of time.
  *
- * Zoom: wheel / pinch around the pointer, drag to pan, double-click (or the button) to reset.
- * The y-axis refits to the visible data.
+ * Zoom by window: drag across the plot to select a stretch of time and release to zoom into it;
+ * double-click (or the button) resets. The y-axis refits to the visible data.
  */
 
 import { useId, useMemo, useRef, useState } from "react";
 import ChartFrame from "./ChartFrame";
 import type { ChartExplanation } from "./chartInfo";
 import { axisTime, formatNumber, nearestIndex, niceTicks, tooltipTime, useSize } from "./chartUtils";
-import { panRange, useZoomGestures, zoomRange } from "./useZoomGestures";
+import { rangeFromPixels, SelectionRect, useZoomWindow } from "./useZoomGestures";
 
 export interface TimeSeriesSpec {
   name: string;
@@ -217,26 +217,16 @@ export default function TimeChart({
     };
   }, [t, series, W, innerW, innerH, yDomain, zeroBased, fixedTicks, view]);
 
-  // Latest requested range: several gesture events can arrive before the next render.
-  const viewRef = useRef<[number, number] | null>(null);
-  viewRef.current = model?.zoomed ? [model.t0, model.t1] : null;
-  const apply = (v: [number, number] | null) => {
-    viewRef.current = v;
-    setView(v);
-  };
-  const busyRef = useZoomGestures(plotEl, {
-    onZoom: (factor, px) => {
+  const { selection, busyRef } = useZoomWindow(plotEl, {
+    axis: "x",
+    bounds: () => (model ? { left: PAD.left, right: PAD.left + innerW, top: PAD.top, bottom: PAD.top + innerH } : null),
+    onSelect: (s) => {
       if (!model) return;
       const minSpan = Math.max(20 * resolutionSeconds * 1000, 60_000);
-      apply(zoomRange(model.full, viewRef.current, factor, (px - PAD.left) / innerW, minSpan));
-    },
-    onPan: (dx) => {
-      const cur = viewRef.current;
-      if (!model || !cur) return;
       onHover(null);
-      apply(panRange(model.full, cur, (-dx / innerW) * (cur[1] - cur[0])));
+      setView(rangeFromPixels(s.x0, s.x1, PAD.left, innerW, [model.t0, model.t1], model.full, minSpan));
     },
-    onReset: () => apply(null),
+    onReset: () => setView(null),
   });
 
   const hover = useMemo(() => {
@@ -324,7 +314,8 @@ export default function TimeChart({
                 <path key={`l${k}`} d={model.paths[k].line} fill="none" stroke={s.color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
               ))}
             </g>
-            {hover && (
+            <SelectionRect s={selection} />
+            {hover && !selection && (
               <g pointerEvents="none">
                 <line x1={hover.px} x2={hover.px} y1={PAD.top} y2={PAD.top + innerH} stroke="white" strokeOpacity={0.45} />
                 {series.map((s) => {
@@ -337,7 +328,7 @@ export default function TimeChart({
             )}
           </svg>
         )}
-        {hover && model && (
+        {hover && model && !selection && (
           <div
             className="pointer-events-none absolute top-1 z-10 min-w-[8rem] rounded-lg bg-slate-950/95 px-2.5 py-1.5 text-[clamp(0.7rem,1.4vh,1rem)] shadow-lg ring-1 ring-white/15"
             style={hover.px > W / 2 ? { right: W - hover.px + 10 } : { left: hover.px + 10 }}

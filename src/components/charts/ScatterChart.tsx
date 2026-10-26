@@ -3,14 +3,14 @@
 /**
  * Scatter plot drawn on a canvas (thousands of 10-minute points), with SVG axes and a
  * nearest-point hover readout (the pointer only has to be closest, within 24 px).
- * Zoom on both axes: wheel / pinch around the pointer, drag to pan, double-click to reset.
+ * Zoom by window: drag a rectangle over the points and release to zoom into it; double-click resets.
  */
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import ChartFrame from "./ChartFrame";
 import type { ChartExplanation } from "./chartInfo";
 import { formatNumber, niceTicks, useSize } from "./chartUtils";
-import { panRange, useZoomGestures, zoomRange } from "./useZoomGestures";
+import { rangeFromPixels, SelectionRect, useZoomWindow } from "./useZoomGestures";
 
 type Range = [number, number];
 
@@ -86,31 +86,19 @@ export default function ScatterChart({
     return { xTicks, yTicks, sx, sy, count, full, vx, vy, xTickDigits: digitsFor(xTicks), yTickDigits: digitsFor(yTicks) };
   }, [x, y, W, innerW, innerH, view]);
 
-  // Latest requested view: several gesture events can arrive before the next render.
-  const viewRef = useRef(view);
-  viewRef.current = view;
-  const apply = (v: { x: Range; y: Range } | null) => {
-    viewRef.current = v;
-    setView(v);
-  };
-  const busyRef = useZoomGestures(plotEl, {
-    onZoom: (factor, px, py) => {
+  const { selection, busyRef } = useZoomWindow(plotEl, {
+    axis: "xy",
+    bounds: () => (model ? { left: PAD.left, right: PAD.left + innerW, top: PAD.top, bottom: PAD.top + innerH } : null),
+    onSelect: (s) => {
       if (!model) return;
-      const cur = viewRef.current;
-      const nx = zoomRange(model.full.x, cur?.x ?? null, factor, (px - PAD.left) / innerW, (model.full.x[1] - model.full.x[0]) / 40);
-      const ny = zoomRange(model.full.y, cur?.y ?? null, factor, 1 - (py - PAD.top) / innerH, (model.full.y[1] - model.full.y[0]) / 40);
-      apply(nx || ny ? { x: nx ?? model.full.x, y: ny ?? model.full.y } : null);
-    },
-    onPan: (dx, dy) => {
-      const cur = viewRef.current;
-      if (!model || !cur) return;
       setHover(null);
-      apply({
-        x: panRange(model.full.x, cur.x, (-dx / innerW) * (cur.x[1] - cur.x[0])) ?? cur.x,
-        y: panRange(model.full.y, cur.y, (dy / innerH) * (cur.y[1] - cur.y[0])) ?? cur.y,
-      });
+      const nx = rangeFromPixels(s.x0, s.x1, PAD.left, innerW, model.vx, model.full.x, (model.full.x[1] - model.full.x[0]) / 40);
+      // Screen y grows downwards: measure the selection from the bottom of the plot.
+      const bottom = PAD.top + innerH;
+      const ny = rangeFromPixels(bottom - s.y1 + PAD.top, bottom - s.y0 + PAD.top, PAD.top, innerH, model.vy, model.full.y, (model.full.y[1] - model.full.y[0]) / 40);
+      setView(nx || ny ? { x: nx ?? model.full.x, y: ny ?? model.full.y } : null);
     },
-    onReset: () => apply(null),
+    onReset: () => setView(null),
   });
 
   useEffect(() => {
@@ -173,7 +161,7 @@ export default function ScatterChart({
       className={className}
       info={info}
       zoomed={view !== null}
-      onResetZoom={() => apply(null)}
+      onResetZoom={() => setView(null)}
       title={title}
       legend={
         refPath && referenceName ? (
@@ -226,12 +214,13 @@ export default function ScatterChart({
               <rect x={PAD.left} y={PAD.top} width={innerW} height={innerH} />
             </clipPath>
             {refPath && <path d={refPath} clipPath={`url(#${clipId})`} fill="none" stroke="#ffffff" strokeWidth={2} strokeOpacity={0.9} />}
-            {hover !== null && (
+            <SelectionRect s={selection} />
+            {hover !== null && !selection && (
               <circle cx={model.sx(x[hover] as number)} cy={model.sy(y[hover] as number)} r={5} fill={color} stroke="#ffffff" strokeWidth={2} />
             )}
           </svg>
         )}
-        {hover !== null && model && (
+        {hover !== null && model && !selection && (
           <div
             className="pointer-events-none absolute z-10 rounded-lg bg-slate-950/95 px-2.5 py-1.5 text-[clamp(0.7rem,1.4vh,1rem)] shadow-lg ring-1 ring-white/15"
             style={{

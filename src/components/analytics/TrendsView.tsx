@@ -87,7 +87,7 @@ export default function TrendsView({ active }: { active: boolean }) {
       status={status}
       controls={<RangePicker label="Time window" options={WINDOWS} value={win} onChange={setWin} />}
       note={
-        d ? `${res === 1 ? "Every second" : "Every minute"} · ${d.t.length.toLocaleString("en-GB")} readings · ⓘ explains each chart · scroll or pinch to zoom` : undefined
+        d ? `${res === 1 ? "Every second" : "Every minute"} · ${d.t.length.toLocaleString("en-GB")} readings · ⓘ explains each chart · drag across a chart to zoom in` : undefined
       }
       tiles={
         <>

@@ -27,7 +27,7 @@ const ICON_BTN =
   "grid size-[clamp(1.9rem,3.6vh,2.8rem)] shrink-0 place-items-center rounded-xl text-white/70 ring-1 ring-white/10 transition-colors hover:bg-white/10 hover:text-white";
 const ICON = "size-[clamp(0.95rem,1.9vh,1.4rem)]";
 
-export const ZOOM_HINT = "Scroll or pinch to zoom · drag to move · double-click to reset";
+export const ZOOM_HINT = "Drag across the chart to zoom into that window · double-click or ↺ to reset";
 
 function Explanation({ info, className = "" }: { info: ChartExplanation; className?: string }) {
   return (

@@ -133,7 +133,7 @@ export default function StatsView({ active }: { active: boolean }) {
         d ? (
           <>
             10-minute statistics · {d.t.length.toLocaleString("en-GB")} records
-            {coverageNote && <> · {coverageNote}</>} · ⓘ explains each chart · scroll or pinch to zoom
+            {coverageNote && <> · {coverageNote}</>} · ⓘ explains each chart · drag across a chart to zoom in
           </>
         ) : undefined
       }

@@ -2,14 +2,15 @@
 
 /**
  * Vertical bar chart (SVG): rounded data-ends on the baseline, per-bar hover readout.
- * Zoom along the bars: wheel / pinch, drag to pan, double-click to reset; the y-axis refits.
+ * Zoom by window: drag across a run of bars and release to zoom into it; double-click resets.
+ * The y-axis refits to the visible bars.
  */
 
-import { useId, useMemo, useRef, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import ChartFrame from "./ChartFrame";
 import type { ChartExplanation } from "./chartInfo";
 import { formatNumber, niceTicks, useSize } from "./chartUtils";
-import { panRange, useZoomGestures, zoomRange } from "./useZoomGestures";
+import { rangeFromPixels, SelectionRect, useZoomWindow } from "./useZoomGestures";
 
 export interface Bar {
   key: string;
@@ -60,24 +61,18 @@ export default function BarChart({ title, unit, bars, color, digits = 1, info, c
     return { ticks, slot, gap, y, every, left, first, last, a, b, full, zoomed: view !== null && view[1] <= bars.length };
   }, [bars, W, innerW, innerH, view]);
 
-  const viewRef = useRef(view);
-  viewRef.current = model?.zoomed ? [model.a, model.b] : null;
-  const apply = (v: [number, number] | null) => {
-    viewRef.current = v;
-    setView(v);
-  };
-  const busyRef = useZoomGestures(plotEl, {
-    onZoom: (factor, px) => {
+  const { selection, busyRef } = useZoomWindow(plotEl, {
+    axis: "x",
+    bounds: () => (model ? { left: PAD.left, right: PAD.left + innerW, top: PAD.top, bottom: PAD.top + innerH } : null),
+    onSelect: (s) => {
       if (!model) return;
-      apply(zoomRange(model.full, viewRef.current, factor, (px - PAD.left) / innerW, Math.min(5, bars.length)));
-    },
-    onPan: (dx) => {
-      const cur = viewRef.current;
-      if (!model || !cur) return;
       setHover(null);
-      apply(panRange(model.full, cur, (-dx / innerW) * (cur[1] - cur[0])));
+      const r = rangeFromPixels(s.x0, s.x1, PAD.left, innerW, [model.a, model.b], model.full, Math.min(3, bars.length));
+      // Whole bars only.
+      const snapped: [number, number] | null = r ? [Math.max(0, Math.floor(r[0])), Math.min(bars.length, Math.ceil(r[1]))] : null;
+      setView(snapped && snapped[1] - snapped[0] < bars.length ? snapped : null);
     },
-    onReset: () => apply(null),
+    onReset: () => setView(null),
   });
   const clipId = `clip-${useId().replace(/:/g, "")}`;
 
@@ -86,7 +81,7 @@ export default function BarChart({ title, unit, bars, color, digits = 1, info, c
       className={className}
       info={info}
       zoomed={!!model?.zoomed}
-      onResetZoom={() => apply(null)}
+      onResetZoom={() => setView(null)}
       title={
         <>
           {title} <span className="font-normal text-white/50">({unit})</span>
@@ -142,9 +137,10 @@ export default function BarChart({ title, unit, bars, color, digits = 1, info, c
               );
             })}
             </g>
+            <SelectionRect s={selection} />
           </svg>
         )}
-        {hover !== null && model && bars[hover] && (
+        {hover !== null && model && bars[hover] && !selection && (
           <div
             className="pointer-events-none absolute top-1 z-10 rounded-lg bg-slate-950/95 px-2.5 py-1.5 text-[clamp(0.7rem,1.4vh,1rem)] shadow-lg ring-1 ring-white/15"
             style={

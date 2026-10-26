@@ -50,8 +50,10 @@ idle time: `DEMO_IDLE_MS` in `src/app/page.tsx`.
 
 ## Charts
 
-Every chart in the "Last hours" and "10-min statistics" tabs can be zoomed (mouse wheel or pinch,
-drag to move, double-click or the ↺ button to reset); on time charts the zoom is shared by all the
+Every chart in the "Last hours" and "10-min statistics" tabs can be zoomed by window: drag across
+the plot (mouse, pen or finger) to draw a selection and release to zoom into it — a time span on
+time and bar charts, a rectangle on the power curve; repeat to zoom further, double-click or the ↺
+button to reset; on time charts the zoom is shared by all the
 charts of the tab, like the hover readout. The ⓘ button explains each figure (what it shows, why it
 matters, what to look for) and ⤢ opens it full screen with the explanation alongside. Texts:
 `src/components/charts/chartInfo.ts`.
