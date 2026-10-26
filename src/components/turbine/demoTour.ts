@@ -22,8 +22,26 @@ const READ_CPS = 28;
 const MIN_READ_MS = 2_500;
 const MAX_READ_MS = 7_000;
 
-/** How long to stay on a step: the flight, then the time to read what the panel shows. */
-export function demoDwellMs(step: DemoStep): number {
+/** Choices offered in the kiosk menu: time on each component, `null` = automatic. */
+export const DEMO_DWELL_OPTIONS: Array<{ label: string; ms: number | null }> = [
+  { label: "Auto", ms: null },
+  { label: "4 s", ms: 4_000 },
+  { label: "6 s", ms: 6_000 },
+  { label: "10 s", ms: 10_000 },
+  { label: "15 s", ms: 15_000 },
+  { label: "20 s", ms: 20_000 },
+];
+
+/** Pause before the first stop. */
+export const DEMO_START_MS = 1_500;
+
+/**
+ * How long to stay on a step. Automatic: the flight, then time scaled to the panel text, with a
+ * 12 s overview between parts. Fixed (`fixedMs`): that time on every component, flight included,
+ * and on the overview too.
+ */
+export function demoDwellMs(step: DemoStep, fixedMs: number | null = null): number {
+  if (fixedMs !== null) return Math.max(FLIGHT_MS + 1_000, fixedMs);
   if (step === null) return OVERVIEW_MS;
   const info = PART_INFO[step];
   const text = info.opens ? `${info.name} ${info.intro ?? info.description}` : `${info.name} ${info.description}`;

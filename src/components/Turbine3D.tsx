@@ -31,7 +31,7 @@ import { NacelleInterior, YawSystem } from "./turbine/NacelleInterior";
 import { PART_INFO, TOWER_OPEN_FOCUS, type Focus, type OpenableId, type PartId } from "./turbine/parts";
 import TowerInterior from "./turbine/TowerInterior";
 import SiteSplat from "./turbine/SiteSplat";
-import { DEMO_STEPS, demoDwellMs } from "./turbine/demoTour";
+import { DEMO_START_MS, DEMO_STEPS, demoDwellMs } from "./turbine/demoTour";
 import { SignalLayer, SignalProjector, type FreeArea, type SignalRegistry } from "./turbine/SignalOverlay";
 import { overviewSignalGroups, signalGroups } from "./turbine/signals";
 import GridFlow from "./turbine/GridFlow";
@@ -80,9 +80,11 @@ export interface Turbine3DProps {
   site?: boolean;
   /** Self-running tour of every component (kiosk demo mode). Any visitor input should end it. */
   demo?: boolean;
+  /** Fixed time on each demo stop (ms); `null` / omitted = automatic, from the panel text. */
+  demoDwell?: number | null;
 }
 
-type LiveInputs = Omit<Turbine3DProps, "className" | "onExploringChange" | "compact" | "callouts" | "site" | "demo">;
+type LiveInputs = Omit<Turbine3DProps, "className" | "onExploringChange" | "compact" | "callouts" | "site" | "demo" | "demoDwell">;
 
 /* ------------------------------------------------------------------ */
 /* Procedural geometry                                                 */
@@ -954,6 +956,7 @@ export default function Turbine3D({
   callouts,
   site = true,
   demo = false,
+  demoDwell = null,
   ...props
 }: Turbine3DProps) {
   const calloutRegistry = useRef<CalloutRegistry>(new Map());
@@ -1070,12 +1073,12 @@ export default function Turbine3D({
       step++;
       if (s === null) close();
       else select(s);
-      timer = setTimeout(next, demoDwellMs(s));
+      timer = setTimeout(next, demoDwellMs(s, demoDwell));
     };
     close();
-    timer = setTimeout(next, demoDwellMs(null));
+    timer = setTimeout(next, DEMO_START_MS);
     return () => clearTimeout(timer);
-  }, [demo, select, close]);
+  }, [demo, demoDwell, select, close]);
 
   // Recover from a lost GPU context (driver reset, sleep/wake) by remounting the canvas.
   const onCreated = useCallback(({ gl }: RootState) => {

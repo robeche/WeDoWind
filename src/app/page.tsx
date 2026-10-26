@@ -5,7 +5,8 @@ import { Maximize, Minimize, RefreshCw, Wind } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
 import { buildCallouts } from "@/components/FloatingSigns";
-import DemoBadge from "@/components/DemoBadge";
+import ClockMenu from "@/components/ClockMenu";
+import FitText from "@/components/FitText";
 import TabBar, { type KioskTab } from "@/components/TabBar";
 import StatsView from "@/components/analytics/StatsView";
 import TrendsView from "@/components/analytics/TrendsView";
@@ -13,11 +14,11 @@ import MessageTicker from "@/components/MessageTicker";
 import MobileKiosk from "@/components/MobileKiosk";
 import SafeBoundary from "@/components/SafeBoundary";
 import { useIsMobile } from "@/hooks/useIsMobile";
-import { useDemoMode, useFullscreen, useIdleCursor, useKioskMaintenance, useNow } from "@/hooks/useKiosk";
+import { useDemoDwell, useDemoMode, useFullscreen, useIdleCursor, useKioskMaintenance, useNow } from "@/hooks/useKiosk";
 import { useLiveTurbine, useTurbineHistory } from "@/hooks/useTurbineData";
 import type { TurbineStatus } from "@/services/aceApi";
 import { COMMUNITY_FUND_GBP_PER_KWH, computeCommunityMetrics } from "@/utils/metrics";
-import { formatUkDate, formatUkTime } from "@/utils/sun";
+import { formatUkTime } from "@/utils/sun";
 
 const Turbine3D = dynamic(() => import("@/components/Turbine3D"), {
   ssr: false,
@@ -55,6 +56,23 @@ export default function KioskPage() {
   // Demo tour of the 3D twin after 30 s without input (only on the live view: the data tabs
   // keep their own longer timeout back to the live view).
   const demo = useDemoMode(DEMO_IDLE_MS, tab === "live");
+  const [demoDwell, setDemoDwell] = useDemoDwell();
+  const startDemo = () => {
+    setTab("live");
+    // After the tab switch has enabled demo mode on the live view.
+    setTimeout(demo.start, 0);
+  };
+  const clock = (compact: boolean) => (
+    <ClockMenu
+      now={now}
+      demo={demo}
+      onStart={startDemo}
+      dwell={demoDwell}
+      onDwell={setDemoDwell}
+      idleSeconds={DEMO_IDLE_MS / 1000}
+      compact={compact}
+    />
+  );
 
   const metrics = useMemo(() => computeCommunityMetrics(live, history), [live, history]);
   const ready = live !== null;
@@ -78,7 +96,9 @@ export default function KioskPage() {
         lastUpdated={lastUpdated}
         tab={tab}
         onTabChange={setTab}
-        demo={demo}
+        demo={demo.active}
+        demoDwell={demoDwell}
+        clock={clock(true)}
       />
     );
   }
@@ -87,15 +107,16 @@ export default function KioskPage() {
     <main className="flex h-dvh w-screen flex-col gap-[1.6vh] overflow-hidden bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 p-[2vh] text-white">
       {/* Header */}
       <header className="flex items-center justify-between gap-6">
-        <div className="flex min-w-0 items-center gap-[1.6vh]">
+        <div className="flex min-w-0 flex-1 items-center gap-[1.6vh]">
           <div className="grid size-[7vh] shrink-0 place-items-center rounded-2xl bg-emerald-400 text-slate-950">
             <Wind className="size-[4.4vh]" strokeWidth={2.6} />
           </div>
-          <div className="min-w-0">
-            <h1 className="truncate text-[clamp(1.5rem,4vh,3.4rem)] font-extrabold leading-tight">
+          <div className="min-w-0 flex-1">
+            {/* The name always shows in full: a smaller font when the header is tight. */}
+            <FitText as="h1" minScale={0} minPx={15} wrap className="text-[clamp(1.5rem,4vh,3.4rem)] font-extrabold leading-tight">
               Lawrence Weston Community Wind Turbine
-            </h1>
-            <p className="truncate text-[clamp(0.9rem,2.1vh,1.7rem)] text-white/70">
+            </FitText>
+            <p className="hidden truncate text-[clamp(0.9rem,2.1vh,1.7rem)] text-white/70 xl:block">
               Owned by the community · Ambition Community Energy &amp; Ambition Lawrence Weston
             </p>
           </div>
@@ -103,21 +124,7 @@ export default function KioskPage() {
 
         <div className="flex shrink-0 items-center gap-[2vh]">
           <TabBar tab={tab} onChange={setTab} />
-          <div className={`flex items-center gap-3 rounded-full px-[2vh] py-[1vh] ring-1 ${statusStyle.pill}`}>
-            <span className="relative flex size-[1.8vh]">
-              {status === "Generating" && (
-                <span className={`absolute inline-flex size-full animate-ping rounded-full opacity-70 ${statusStyle.dot}`} />
-              )}
-              <span className={`relative inline-flex size-full rounded-full ${statusStyle.dot}`} />
-            </span>
-            <span className="text-[clamp(1rem,2.5vh,2rem)] font-semibold">{ready ? statusStyle.text : "Connecting…"}</span>
-          </div>
-          <div className="text-right">
-            <div className="text-[clamp(1.5rem,4.2vh,3.4rem)] font-bold leading-none tabular-nums">
-              {now ? formatUkTime(now) : "--:--"}
-            </div>
-            <div className="text-[clamp(0.8rem,1.8vh,1.4rem)] text-white/60">{now ? formatUkDate(now) : ""}</div>
-          </div>
+          {clock(false)}
           <button
             type="button"
             onClick={toggleFullscreen}
@@ -148,11 +155,10 @@ export default function KioskPage() {
             hasData={ready}
             snapshot={live}
             onExploringChange={setExploring}
-            demo={demo}
+            demo={demo.active}
+            demoDwell={demoDwell}
           />
         </SafeBoundary>
-
-        <DemoBadge active={demo} />
 
         <div
           className={`pointer-events-none absolute bottom-[2vh] left-1/2 flex -translate-x-1/2 flex-col items-center gap-2 transition-opacity duration-500 ${

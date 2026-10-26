@@ -9,9 +9,8 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { RefreshCw, Wind } from "lucide-react";
 import dynamic from "next/dynamic";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import MessageTicker from "@/components/MessageTicker";
-import DemoBadge from "@/components/DemoBadge";
 import SafeBoundary from "@/components/SafeBoundary";
 import { buildCallouts } from "@/components/FloatingSigns";
 import TabBar, { type KioskTab } from "@/components/TabBar";
@@ -19,7 +18,7 @@ import StatsView from "@/components/analytics/StatsView";
 import TrendsView from "@/components/analytics/TrendsView";
 import type { LiveSnapshot, TurbineStatus } from "@/services/aceApi";
 import type { CommunityMetrics } from "@/utils/metrics";
-import { formatUkDate, formatUkTime } from "@/utils/sun";
+import { formatUkTime } from "@/utils/sun";
 
 const Turbine3D = dynamic(() => import("@/components/Turbine3D"), {
   ssr: false,
@@ -43,6 +42,9 @@ export interface MobileKioskProps {
   onTabChange: (t: KioskTab) => void;
   /** Self-running tour of the 3D twin (see useDemoMode). */
   demo?: boolean;
+  demoDwell?: number | null;
+  /** Clock with the guided-tour menu. */
+  clock: ReactNode;
 }
 
 /* ------------------------------------------------------------------ */
@@ -61,6 +63,8 @@ export default function MobileKiosk({
   tab,
   onTabChange,
   demo = false,
+  demoDwell = null,
+  clock,
 }: MobileKioskProps) {
   const [exploring, setExploring] = useState(false);
   const ready = live !== null;
@@ -91,10 +95,9 @@ export default function MobileKiosk({
           snapshot={live}
           onExploringChange={setExploring}
           demo={demo}
+          demoDwell={demoDwell}
         />
       </SafeBoundary>
-
-      <DemoBadge active={demo} compact />
 
       {/* Header */}
       <header className="pointer-events-none absolute inset-x-0 top-0 bg-gradient-to-b from-slate-950/85 via-slate-950/50 to-transparent px-3 pb-6 pt-[max(0.75rem,env(safe-area-inset-top))]">
@@ -114,10 +117,7 @@ export default function MobileKiosk({
               {ready ? statusStyle.text : "Connecting…"}
             </div>
           </div>
-          <div className="shrink-0 text-right">
-            <div className="text-lg font-bold leading-none tabular-nums">{now ? formatUkTime(now) : "--:--"}</div>
-            <div className="mt-0.5 text-[0.62rem] text-white/60">{now ? formatUkDate(now) : ""}</div>
-          </div>
+          {clock}
         </div>
         <div className="pointer-events-auto mt-2 flex justify-center">
           <TabBar tab={tab} onChange={onTabChange} compact />

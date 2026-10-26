@@ -97,21 +97,38 @@ export function useKioskMaintenance(reloadAtUk = "04:00") {
   }, [reloadAtUk]);
 }
 
+/** Elements marked with this attribute (the demo menu) do not count as visitor input. */
+export const DEMO_CONTROL_ATTR = "data-demo-control";
+
+export interface DemoMode {
+  active: boolean;
+  /** Start the tour now (from the kiosk menu). */
+  start: () => void;
+  stop: () => void;
+}
+
 /**
  * Demo mode: after `idleMs` without any visitor input (touch, mouse, keyboard, wheel) the kiosk
  * starts its self-running tour; the first input ends it. Only counts while `enabled`.
+ * Started by hand, the tour ignores plain mouse movement and ends on a click, touch or key.
  */
-export function useDemoMode(idleMs = 30_000, enabled = true): boolean {
+export function useDemoMode(idleMs = 30_000, enabled = true): DemoMode {
   const [active, setActive] = useState(false);
+  const [manual, setManual] = useState(false);
+  const [epoch, setEpoch] = useState(0);
   useEffect(() => {
     if (!enabled) {
       setActive(false);
+      setManual(false);
       return;
     }
     let last = Date.now();
-    const touch = () => {
+    const touch = (e: Event) => {
+      if (e.target instanceof Element && e.target.closest(`[${DEMO_CONTROL_ATTR}]`)) return;
+      if (manual && e.type === "pointermove") return;
       last = Date.now();
       setActive(false);
+      setManual(false);
     };
     const events = ["pointerdown", "pointermove", "keydown", "wheel", "touchstart"] as const;
     events.forEach((e) => window.addEventListener(e, touch, { passive: true }));
@@ -122,6 +139,40 @@ export function useDemoMode(idleMs = 30_000, enabled = true): boolean {
       clearInterval(id);
       events.forEach((e) => window.removeEventListener(e, touch));
     };
-  }, [idleMs, enabled]);
-  return active;
+  }, [idleMs, enabled, manual, epoch]);
+  const start = useCallback(() => {
+    setManual(true);
+    setActive(true);
+  }, []);
+  const stop = useCallback(() => {
+    setManual(false);
+    setActive(false);
+    setEpoch((n) => n + 1); // restart the idle count
+  }, []);
+  return { active, start, stop };
+}
+
+const DWELL_KEY = "wedowind.demoDwellMs";
+
+/** Time per demo stop chosen in the kiosk menu (`null` = automatic), remembered on this screen. */
+export function useDemoDwell(): [number | null, (ms: number | null) => void] {
+  const [dwell, setDwell] = useState<number | null>(null);
+  useEffect(() => {
+    try {
+      const v = localStorage.getItem(DWELL_KEY);
+      if (v && Number.isFinite(Number(v))) setDwell(Number(v));
+    } catch {
+      // Storage unavailable: keep the default.
+    }
+  }, []);
+  const set = useCallback((ms: number | null) => {
+    setDwell(ms);
+    try {
+      if (ms === null) localStorage.removeItem(DWELL_KEY);
+      else localStorage.setItem(DWELL_KEY, String(ms));
+    } catch {
+      // Not remembered, still applied.
+    }
+  }, []);
+  return [dwell, set];
 }
